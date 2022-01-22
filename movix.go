@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+
 	// "io/fs"
 	"io/ioutil"
 	"log"
@@ -23,25 +24,34 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 	// "gorm.io/gorm/logger"
 )
 
+var logging bool
+
 const APIKEY = "e130a499c97798cfac3ffb5d0e2cc1be"
 
-type Episode struct {
+type Entry struct {
 	Id int64
 	Length float64
 	Path string
 	Name string
 	Added time.Time
-	Deleted bool
-	// Description string
-	Part int64
-	Season int64
-	// maybe move these out later
 	Offset float64
+	Deleted bool
 	Watched bool
 	Watched_date time.Time
+}
+
+type Movie struct {
+	Entry
+}
+
+type Episode struct {
+	Entry
+	Part int64
+	Season int64
 	SeriesId int
 	Series Series
 };
@@ -59,6 +69,7 @@ type Series struct {
 type Directory struct {
 	Path string `gorm:"primaryKey"`
 	Mtime time.Time
+	//Files string
 	// We need save the directories we saw last time
 }
 
@@ -120,6 +131,39 @@ func update_watched(db *gorm.DB, config *Config, path string, watched_amount flo
 	db.Save(&episode)
 }
 
+func get_movie(path, title string) (*Movie, error) {
+	tmdbClient, err := tmdb.Init(APIKEY)
+	if err != nil {
+		return nil, err
+	}
+	search, err := tmdbClient.GetSearchMovies(title, nil)
+	if err != nil {
+		return nil, err
+	}
+	id := search.Results[0].ID
+	movie_details, err := tmdbClient.GetMovieDetails(int(id), nil)
+	if err != nil {
+		return nil, err
+	}
+	length := get_filelength(path)
+	if almostEqual(length / 60, float64(movie_details.Runtime), 0.85) {
+		movie := &Movie {
+			Entry {
+				Id: movie_details.ID,
+				Path:    path,
+				Length:  length,
+				Name:    movie_details.Title,
+				Added:   time.Now(),
+				Deleted: false,
+				Offset:  0,
+				Watched: false,
+			},
+		}
+		return movie, nil
+	}
+	return nil, errors.New("File length doesn't match tmdb file length")
+}
+
 func get_series(title string) (*Series, error) {
 	tmdbClient, err := tmdb.Init(APIKEY)
 	if err != nil {
@@ -161,16 +205,18 @@ func get_episode(path string, series *Series, season, episodenum int64) (*Episod
 	length := get_filelength(path)
 	if episode_almostEqual(length / 60, show_details.EpisodeRunTime, 0.85) {
 		episode := &Episode{
-			Id:      episode_details.ID,
-			Path:    path,
-			Length:  length,
-			Name:    show_details.Name,
-			Added:   time.Now(),
-			Deleted: false,
+			Entry:Entry{
+				Id:      episode_details.ID,
+				Path:    path,
+				Length:  length,
+				Name:    show_details.Name,
+				Added:   time.Now(),
+				Deleted: false,
+				Offset:  0,
+				Watched: false,
+			},
 			Part:    episodenum,
 			Season:  season,
-			Offset:  0,
-			Watched: false,
 			SeriesId: series.Id,
 			Series: *series,
 		}
@@ -209,7 +255,6 @@ func myguessit(path string) (*FileInfo, error) {
 	}
 	return &fileinfo, nil
 }
-
 // we need a helper function
 func walker(db *gorm.DB, path string) {
 	stat, err := os.Stat(path)
@@ -219,6 +264,8 @@ func walker(db *gorm.DB, path string) {
 	}
 	updatetime := stat.ModTime()
 	last_update, entry := db_get_pathinfo(db, path)
+	fmt.Printf("Mod time: %-v\n", updatetime)
+	fmt.Printf("Last time: %-v\n", last_update)
 	if entry && !last_update.Before(updatetime) {
 		return
 	}
@@ -244,36 +291,48 @@ func walker(db *gorm.DB, path string) {
 		if stat.IsDir() {
 			walker(db, newpath)
 		} else {
-			// doesn't work atm
+			// XXX add logging!
 			guessed, err := myguessit(f.Name())
 			if err != nil {
 				continue
 			}
+			// we need suport for things like vods
 			if len(guessed.Mimetype) < 5 || guessed.Mimetype[:5] != "video" {
 				continue
 			}
-			series, err := get_series(guessed.Title)
-			if err != nil {
-				continue
+			log.Printf("Adding file: %s\n", newpath)
+			switch guessed.Type {
+			case "movie":
+				movie, err := get_movie(newpath, guessed.Title)
+				if err != nil {
+					continue
+				}
+				// XXX do we need to make this updateadble?
+				db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
+			case "episode":
+				series, err := get_series(guessed.Title)
+				if err != nil {
+					continue
+				}
+				episode, err := get_episode(newpath, series, guessed.Season, guessed.Episode)
+				if err != nil {
+					continue
+				}
+				// XXX do we need to make this updateadble?
+				db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
+				db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
 			}
-			episode, err := get_episode(newpath, series, guessed.Season, guessed.Episode)
-			if err != nil {
-				continue
-			}
-			// XXX do we need to make this updateadble
-			db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
-			db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
 		}
 	}
 }
 
-func Conf() Config {
+func Conf() *Config {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(xdg.ConfigHome + "/movix/")
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
-	viper.SetDefault("LuaPluginPath", "/home/dagle/code/govix/movix.lua")
+	// viper.SetDefault("LuaPluginPath", "/home/dagle/code/govix/movix.lua")
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -284,7 +343,20 @@ func Conf() Config {
 	if err != nil {
 		fmt.Printf("Unable to decode into struct, %v", err)
 	}
-	return conf
+	stat, err := os.Stat(conf.Mediapath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if !stat.IsDir() {
+		fmt.Fprintln(os.Stderr, "Mediapath \"%s\" isn't a directory", conf.Mediapath)
+		os.Exit(2)
+	}
+	if conf.Dbpath == "" {
+		conf.Dbpath = xdg.ConfigHome + "/movix/" + "movix.db"
+
+	}
+	return &conf
 }
 
 func useage() {
@@ -300,11 +372,12 @@ func watchusage() {
 }
 
 // can we pass in a string?
-func get_next(db *gorm.DB) (*Episode, error) {
+// XXX these should be able search multiple tables?
+func get_next_tv(db *gorm.DB) (*Episode, error) {
 	var episode Episode
 	// Might be correct, first try?
 	err := db.Joins("Series").
-		Where("watched = ? and Series__subscribed = ?", false, true).
+		Where("watched = ? and Series__subscribed = ? and deleted = ?", false, true, false).
 		Order("Series__last_watched, season, part").
 		First(&episode).
 		Error
@@ -314,11 +387,11 @@ func get_next(db *gorm.DB) (*Episode, error) {
 	return &episode, nil
 }
 
-// we only want the first of each series
-func get_nexts(db *gorm.DB) ([]Episode, error) {
+// do we even want this function? Can't we just do head?
+func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 	var episodes []Episode
 	err := db.Joins("Series").
-		Where("watched = ? and Series__subscribed = ?", false, true).
+		Where("watched = ? and Series__subscribed = ? and deleted = ?", false, true, false).
 		Order("Series__last_watched, season, part").
 		Group("Series.id").
 		Find(&episodes).
@@ -329,9 +402,47 @@ func get_nexts(db *gorm.DB) ([]Episode, error) {
 	return episodes, nil
 }
 
+func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
+	var movies []Movie
+	err := db.
+		Where("watched = ? and deleted = ?", false, false).
+		// Order("").
+		Find(&movies).
+		Error
+	if err != nil {
+		panic("sql error")
+	}
+	return movies, nil
+}
+
+func play_file(db *gorm.DB, path string, conf *Config) () {
+	var episode Episode
+	err := db.First(&episode, "path = ?", path).
+		Error
+	if err != nil {
+		panic("sql error")
+	}
+	episode.play(conf)
+}
+
+func (entry *Entry) play (conf *Config) {
+	err := exec.Command("mpv",
+		"--script=" + conf.LuaPluginPath, 
+		"--start=" + fmt.Sprintf("%f", entry.Offset),
+		entry.Path).Run()
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+func (entry *Entry) show() {
+	fmt.Printf("%s %f %s\n", entry.Path, entry.Offset, entry.Name)
+}
+
 func main() {
 	flag.Usage = useage
-	flag.String("search", "", "A search to filter out")
+	// flag.String("search", "", "A search to filter out")
+	sqllog := flag.Bool("q", false, "Log sql queries to output")
+	flag.BoolVar(&logging, "l", false, "Turn on logging")
 	flag.Parse()
 
 	args := flag.Args()
@@ -340,18 +451,29 @@ func main() {
 	}
 
 	conf := Conf()
-	db, err := gorm.Open(sqlite.Open(conf.Dbpath), &gorm.Config{
-		// Logger: logger.Default.LogMode(logger.Info),
-	})
+	
+	var gormcfg gorm.Config
+	if *sqllog {
+		gormcfg = gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
+	} else {
+		gormcfg = gorm.Config{}
+	}
+	db, err := gorm.Open(sqlite.Open(conf.Dbpath), &gormcfg)
 	if err != nil {
 		panic("Couldn't open movix database")
 	}
 	switch args[0] {
 	case "create":
+	case "play":
+		if len(args) != 2 {
+			panic("play needs a filename")
+		}
+		play_file(db, args[1], conf)
 	case "new":
 		db.AutoMigrate(&Directory{})
 		db.AutoMigrate(&Episode{})
 		db.AutoMigrate(&Series{})
+		db.AutoMigrate(&Movie{})
 		walker(db, conf.Mediapath)
 	case "watched":
 		if len(args) < 3 {
@@ -363,24 +485,18 @@ func main() {
 			watchusage()
 		}
 		// should be able to take an id?
-		update_watched(db, &conf, args[1], s)
+		update_watched(db, conf, args[1], s)
 	case "next":
-		entry, _ := get_next(db)
-		fmt.Printf("offset: %d\n", entry.Offset)
-		err := exec.Command("mpv",
-			"--script=" + conf.LuaPluginPath, 
-			"--start=" + fmt.Sprintf("%f", entry.Offset),
-			entry.Path).Run()
-		// err := exec.Command("mpv", entry.Path).Run()
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		// fmt.Printf("%s\n",entry.Path)
+		entry, _ := get_next_tv(db)
+		entry.play(conf)
 	case "nexts":
-		entries, _ := get_nexts(db)
-		for _, e := range entries {
-			fmt.Printf("%s\n", e.Series.Name)
+		episodes, _ := get_nexts_tv(db)
+		for _, e := range episodes {
+			e.show()
+		}
+		movies, _ := get_nexts_movie(db)
+		for _, e := range movies {
+			e.show()
 		}
 	}
 }

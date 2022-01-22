@@ -1,0 +1,30 @@
+@document.meta
+    title: TODO
+    description: 
+    authors: dagle
+    categories: 
+    created: 2022-01-21
+    version: 0.0.9
+@end
+
+* movix.go 
+  - [ ] Being able to sync between different dbs
+  - [ ] Write a basic test suit
+  - [ ] Support searches
+  - [ ] Deleting files should mark them as deleted in the db
+  - [ ] Cleaning up the code.
+  - [ ] Split the code into different files
+  - [ ] Write a guessit in go (for a speedup)
+  - [-] fuzzy scripts
+  -- [x] fzf
+  -- [ ] dmenu family
+  - [-] Support more format
+  -- [-] Support movies
+  -- [ ] Support vods
+
+* Packaging
+- [ ] Readme
+-- [ ] Usage
+-- [ ] Install
+- [ ] Package it so it's easier for others to install
+

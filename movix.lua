@@ -7,3 +7,5 @@ local function onexit()
 end
 
 mp.add_hook("on_unload", 1, onexit)
+-- we want to add a function to exit without saving
+-- we want to add a function to mark this as watched (and quit?)
