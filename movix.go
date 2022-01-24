@@ -404,6 +404,34 @@ func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 	return episodes, err
 }
 
+func skipUntil(db *gorm.DB, name string, season, episode int) error {
+	var episodes []Episode
+	err := db.Joins("Series").Joins("Entry").
+		Where("Series.name = ? and season < ?", name, season).
+		Find(&episodes).
+		Error
+
+	if err != nil {
+		return err
+	}
+	for _, e := range episodes {
+		e.Entry.Watched = true
+		db.Save(&e.Entry)
+	}
+	err2 := db.Joins("Series").Joins("Entry").
+		Where("Series.name = ? and season = ? and episode < ?", name, season, episode).
+		Find(&episodes).Update("watched", true).
+		Error
+	if err2 != nil {
+		return err
+	}
+	for _, e := range episodes {
+		e.Entry.Watched = true
+		db.Save(&e.Entry)
+	}
+	return nil
+}
+
 func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
 	var movies []Movie
 	err := db.Joins("Entry").
@@ -608,5 +636,15 @@ func main() {
 		for _, e := range movies {
 			e.Entry.show()
 		}
+	case "skip":
+		if len(args) != 4 {
+			log.Fatal("Skip needs 3 arguments")
+		}
+		season, err := strconv.Atoi(args[2])
+		episode, err2 := strconv.Atoi(args[3])
+		if err != nil || err2 != nil {
+			log.Fatal("Arguments 3 and 4 needs to be integers")
+		}
+		skipUntil(db, args[1], season, episode)
 	}
 }
