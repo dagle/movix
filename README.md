@@ -9,12 +9,12 @@ TODO see the TODO file
 First install guessit and golang, then type:
 
 ```
-make install
+make && make install
 ```
 
 ## Config
 To use movix, you first need to configure it. The config file is located at XDGHOME/movix/config
-(defaults to ~/.config/movix/config). You need atleast these 2 variables in the config 
+(defaults to ~/.config/movix/config). You need atleast this variable
 ```
 	Mediapath: "/home/dagle/download/movix/"
 ```
@@ -33,27 +33,16 @@ movix rescan
 ```
 Will go over all your files and try to add them
 
-Later on you can call: 
+Later on you can call:
 
 ```
-movix add file
+movix add directory
 
 ```
-To move a file to mediadir and add it to the db. 
+OBS! Only add collection(like 1 tv-series) at the time with add and not a full library. Use rescan for that.
 
-```
-movix del file
-```
-
-
-
-
-
-You can then run
 ```
 movix nexts
 ```
 
-To get a list of series and movies with unwatched content 
-
-
+To get a list of series and movies with unwatched content, see movix-fzf and movix-rofi for examples to get a small menu.
