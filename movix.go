@@ -41,15 +41,19 @@ type Entry struct {
 }
 
 type Movie struct {
-	Entry
+	gorm.Model
+	EntryID int64
+	Entry Entry
 }
 
 type Episode struct {
-	Entry
+	gorm.Model
 	Part int64
 	Season int64
 	SeriesId int
 	Series Series
+	EntryID int
+	Entry Entry
 };
 
 type Series struct {
@@ -109,21 +113,21 @@ func episodeAlmostEqual(a float64, bs []int, threshold float64) bool {
 }
 
 func updateWatched(db *gorm.DB, config *Config, path string, watched_amount float64, full bool) {
-	var episode Episode
-	err := db.First(&episode, "path = ?", path).Error
+	var entry Entry 
+	err := db.First(&entry, "path = ?", path).Error
 	if err != nil {
 		fmt.Printf("File isn't database: %s\n", path)
 		return 
 	}
 	// if we watch more than trashhold
-	if full || (watched_amount / episode.Length) > config.Treshhold {
-		episode.Offset = 0
-		episode.Watched = true
-		episode.Watched_date = time.Now()
+	if full || (watched_amount / entry.Length) > config.Treshhold {
+		entry.Offset = 0
+		entry.Watched = true
+		entry.Watched_date = time.Now()
 	} else {
-		episode.Offset = watched_amount
+		entry.Offset = watched_amount
 	}
-	db.Save(&episode)
+	db.Save(&entry)
 }
 
 func get_movie(path, title string) (*Movie, error) {
@@ -143,7 +147,7 @@ func get_movie(path, title string) (*Movie, error) {
 	length := get_filelength(path)
 	if almostEqual(length / 60, float64(movie_details.Runtime), 0.85) {
 		movie := &Movie {
-			Entry {
+			Entry:Entry {
 				Id: movie_details.ID,
 				Path:    path,
 				Length:  length,
@@ -153,10 +157,11 @@ func get_movie(path, title string) (*Movie, error) {
 				Offset:  0,
 				Watched: false,
 			},
+			EntryID: movie_details.ID,
 		}
 		return movie, nil
 	}
-	return nil, errors.New("File length doesn't match tmdb file length")
+	return nil, errors.New("file length doesn't match tmdb file length")
 }
 
 func get_series(title string) (*Series, error) {
@@ -217,7 +222,7 @@ func get_episode(path string, series *Series, season, episodenum int64) (*Episod
 		}
 		return episode, nil
 	}
-	return nil, errors.New("File length doesn't match tmdb file length")
+	return nil, errors.New("file length doesn't match tmdb file length")
 }
 
 
@@ -301,18 +306,10 @@ func walker(db *gorm.DB, path string) {
 }
 
 func del(db *gorm.DB, path string) {
-	var episode Episode
-	if err := db.First(&episode, "path = ?", path).Error; err == nil {
-		episode.Deleted = true
-		db.Save(&episode)
-		if filesystem {
-			os.Remove(path)
-		}
-	}
-	var movie Movie
-	if err := db.First(&movie, "path = ?", path).Error; err == nil {
-		episode.Deleted = true
-		db.Save(&movie)
+	var entry Entry 
+	if err := db.First(&entry, "path = ?", path).Error; err == nil {
+		entry.Deleted = true
+		db.Save(&entry)
 		if filesystem {
 			os.Remove(path)
 		}
@@ -365,22 +362,36 @@ func watchusage() {
 }
 
 // can we pass in a string?
-func get_next_tv(db *gorm.DB) (*Episode, error) {
+func get_next(db *gorm.DB, name string) (*Entry, error) {
 	var episode Episode
-	err := db.Joins("Series").
-		Where("watched = ? and Series__subscribed = ? and deleted = ?", false, true, false).
-		Order("Series__last_watched, season, part").
+	// querystring := "watched = ? and deleted = ?"
+	// if name != "" {
+	// }
+	err := db.Joins("Series").Joins("Entry").
+		Where("watched = ? and deleted = ? and Series.name = ?", false, false, name).
+		Order("last_watched, season, part").
+		Group("Series.id").
 		First(&episode).
 		Error
-	return &episode, err
+	if err == nil {
+		return &episode.Entry, nil
+	}
+	var entry Entry
+	err = db. Where("watched = ? and deleted = ? and name = ?", false, false, name).
+		First(&entry).
+		Error
+	if err == nil {
+		return &entry,nil
+	}
+	return nil, errors.New("no entry found")
 }
 
 // do we even want this function? Can't we just do head?
 func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 	var episodes []Episode
-	err := db.Joins("Series").
-		Where("watched = ? and Series__subscribed = ? and deleted = ?", false, true, false).
-		Order("Series__last_watched, season, part").
+	err := db.Joins("Series").Joins("Entry").
+		Where("watched = ? and subscribed = ? and deleted = ?", false, true, false).
+		Order("last_watched, season, part").
 		Group("Series.id").
 		Find(&episodes).
 		Error
@@ -389,7 +400,7 @@ func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 
 func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
 	var movies []Movie
-	err := db.
+	err := db.Joins("Entry").
 		Where("watched = ? and deleted = ?", false, false).
 		Find(&movies).
 		Error
@@ -397,20 +408,18 @@ func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
 }
 
 func play_file(db *gorm.DB, path string, conf *Config) {
-	var episode Episode
-	err := db.First(&episode, "path = ?", path).
+	// var entry Entry 
+	var entry Entry
+	err := db.First(&entry, "path = ?", path).
 		Error
 	if err != nil {
 		panic("Error exucting sql")
 	}
-	episode.play(conf)
+	entry.play(conf)
 }
 
 func (entry *Entry) play (conf *Config) {
 
-	bepa := "--script=" + conf.LuaPluginPath
-	cepa := "--start=" + fmt.Sprintf("%f", entry.Offset)
-	fmt.Printf("mpv %s %s\n", bepa, cepa)
 	err := exec.Command("mpv",
 		"--script=" + conf.LuaPluginPath, 
 		"--start=" + fmt.Sprintf("%f", entry.Offset),
@@ -513,8 +522,8 @@ func main() {
 		useage()
 	}
 
-	conf := Conf()
 	
+	conf := Conf()
 	var gormcfg gorm.Config
 	if *sqllog {
 		gormcfg = gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
@@ -549,6 +558,7 @@ func main() {
 		db.AutoMigrate(&Episode{})
 		db.AutoMigrate(&Series{})
 		db.AutoMigrate(&Movie{})
+		fmt.Printf("Media path: %s\n", conf.Mediapath)
 		walker(db, conf.Mediapath)
 	case "watched":
 		if len(args) < 3 {
@@ -566,16 +576,23 @@ func main() {
 			updateWatched(db, conf, args[1], s, false)
 		}
 	case "next":
-		entry, _ := get_next_tv(db)
-		entry.play(conf)
+		search := ""
+		if len(args) != 2 || args[1] == "" {
+			log.Fatal("movix next needs a title argument")
+		} 
+		search  = args[1]
+		entry, err := get_next(db, search)
+		if err == nil {
+			entry.play(conf)
+		}
 	case "nexts":
 		episodes, _ := get_nexts_tv(db)
 		for _, e := range episodes {
-			e.show()
+			e.Entry.show()
 		}
 		movies, _ := get_nexts_movie(db)
 		for _, e := range movies {
-			e.show()
+			e.Entry.show()
 		}
 	}
 }

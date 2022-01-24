@@ -11,5 +11,4 @@ movix: ${SRC}
 
 install: movix
 	install -Dm755 movix -t '$(DESTDIR)$(BINDIR)'
-	install -Dm755 movix-fzf -t '$(DESTDIR)$(BINDIR)'
 	install -Dm755 movix.lua -t '$(DESTDIR)$(SCRIPT)'
