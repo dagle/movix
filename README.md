@@ -6,6 +6,8 @@ The media needs to formated in such a way that guessit can detect the content, i
 TODO see the TODO file
 
 ## Install
+First install guessit and golang, then type:
+
 ```
 make install
 ```
