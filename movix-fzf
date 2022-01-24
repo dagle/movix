@@ -1,5 +1,5 @@
 #!/bin/sh
 
-mf=$(movix nexts | fzf --with-nth 3.. | awk '{print $1}')
-movix play $mf
+MF=$(movix nexts | fzf)
+movix next "$MF"
 

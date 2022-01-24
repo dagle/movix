@@ -1,4 +1,4 @@
 #!/bin/sh
 
-MF=$(movix nexts | cut -d " " -f 3- | rofi -dmenu -i)
+MF=$(movix nexts | rofi -dmenu -i)
 movix next "$MF"

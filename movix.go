@@ -434,7 +434,7 @@ func (entry *Entry) play (conf *Config) {
 	}
 }
 func (entry *Entry) show() {
-	fmt.Printf("%s %f %s\n", entry.Path, entry.Offset, entry.Name)
+	fmt.Printf("%s\n", entry.Name)
 }
 
 type Mediatype int64
