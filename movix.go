@@ -511,6 +511,14 @@ func sort(conf *Config, path string) error{
 	return os.Rename(path, conf.Mediapath + dir + stat.Name())
 }
 
+func createDirs(conf *Config) {
+	// add more to this later
+	dirs := []string{"/tv", "/movies"}
+	for _, d := range dirs {
+		os.Mkdir(conf.Mediapath + d, 0755)
+	}
+}
+
 var filesystem bool
 var logging bool
 
@@ -541,6 +549,7 @@ func main() {
 	}
 	switch args[0] {
 	case "create":
+		createDirs(conf)
 	case "add":
 		if len(args) != 2 {
 			panic("Sorts needs a filepath")
