@@ -108,7 +108,7 @@ func episodeAlmostEqual(a float64, bs []int, threshold float64) bool {
 	return false
 }
 
-func updateWatched(db *gorm.DB, config *Config, path string, watched_amount float64) {
+func updateWatched(db *gorm.DB, config *Config, path string, watched_amount float64, full bool) {
 	var episode Episode
 	err := db.First(&episode, "path = ?", path).Error
 	if err != nil {
@@ -116,7 +116,7 @@ func updateWatched(db *gorm.DB, config *Config, path string, watched_amount floa
 		return 
 	}
 	// if we watch more than trashhold
-	if (watched_amount / episode.Length) > config.Treshhold {
+	if full || (watched_amount / episode.Length) > config.Treshhold {
 		episode.Offset = 0
 		episode.Watched = true
 		episode.Watched_date = time.Now()
@@ -327,7 +327,7 @@ func Conf() *Config {
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
-	viper.SetDefault("LuaPluginPath", LuaPath)
+	viper.SetDefault("LuaPluginPath", LuaPath + "/movix.lua")
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -407,6 +407,10 @@ func play_file(db *gorm.DB, path string, conf *Config) {
 }
 
 func (entry *Entry) play (conf *Config) {
+
+	bepa := "--script=" + conf.LuaPluginPath
+	cepa := "--start=" + fmt.Sprintf("%f", entry.Offset)
+	fmt.Printf("mpv %s %s\n", bepa, cepa)
 	err := exec.Command("mpv",
 		"--script=" + conf.LuaPluginPath, 
 		"--start=" + fmt.Sprintf("%f", entry.Offset),
@@ -490,7 +494,6 @@ func sort(conf *Config, path string) error{
 	if err != nil {
 		log.Fatal(err)
 	}
-	// fmt.Println(conf.Mediapath + dir + stat.Name())
 	return os.Rename(path, conf.Mediapath + dir + stat.Name())
 }
 
@@ -551,13 +554,17 @@ func main() {
 		if len(args) < 3 {
 			watchusage()
 		}
-		s, err := strconv.ParseFloat(args[2], 32); 
-		if err != nil {
-			fmt.Println(err)
-			watchusage()
+		if args[2] == "full" {
+			updateWatched(db, conf, args[1], 0, true)
+		} else {
+			s, err := strconv.ParseFloat(args[2], 32); 
+			if err != nil {
+				fmt.Println(err)
+				watchusage()
+			}
+			// should be able to take an id?
+			updateWatched(db, conf, args[1], s, false)
 		}
-		// should be able to take an id?
-		updateWatched(db, conf, args[1], s)
 	case "next":
 		entry, _ := get_next_tv(db)
 		entry.play(conf)
