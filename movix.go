@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 
-	// "io/fs"
 	"io/ioutil"
 	"log"
 	"math"
@@ -25,10 +24,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
-	// "gorm.io/gorm/logger"
 )
-
-var logging bool
 
 const APIKEY = "e130a499c97798cfac3ffb5d0e2cc1be"
 
@@ -66,11 +62,19 @@ type Series struct {
 	// more stuff to come
 }
 
-type Directory struct {
-	Path string `gorm:"primaryKey"`
-	Mtime time.Time
-	//Files string
-	// We need save the directories we saw last time
+type FileInfo struct {
+	Title string
+	Year int
+	Screen_size string
+	Source string
+	Other string
+	Codec string
+	Release_group string
+	Season int64
+	Episode int64
+	Group string
+	Mimetype string
+	Type string
 }
 
 type Config struct {
@@ -78,15 +82,6 @@ type Config struct {
 	Dbpath string
 	Treshhold float64
 	LuaPluginPath string
-}
-
-func db_get_pathinfo(db *gorm.DB, path string) (time.Time, bool) {
-	var directory Directory
-	err := db.Where("path = ?", path).Limit(1).Find(&directory).Error
-	if err != nil {
-		return directory.Mtime, false
-	}
-	return directory.Mtime, true
 }
 
 func get_filelength(path string) float64 {
@@ -103,7 +98,8 @@ func almostEqual(a, b, threshold float64) bool {
 	min := math.Min(a,b)
     return min/max >= threshold
 }
-func episode_almostEqual(a float64, bs []int, threshold float64) bool {
+
+func episodeAlmostEqual(a float64, bs []int, threshold float64) bool {
 	for _, b := range bs {
 		if almostEqual(a, float64(b), threshold) {
 			return true
@@ -112,8 +108,7 @@ func episode_almostEqual(a float64, bs []int, threshold float64) bool {
 	return false
 }
 
-// this doesn't work very well with deletion etc
-func update_watched(db *gorm.DB, config *Config, path string, watched_amount float64) {
+func updateWatched(db *gorm.DB, config *Config, path string, watched_amount float64) {
 	var episode Episode
 	err := db.First(&episode, "path = ?", path).Error
 	if err != nil {
@@ -203,7 +198,7 @@ func get_episode(path string, series *Series, season, episodenum int64) (*Episod
 	}
 
 	length := get_filelength(path)
-	if episode_almostEqual(length / 60, show_details.EpisodeRunTime, 0.85) {
+	if episodeAlmostEqual(length / 60, show_details.EpisodeRunTime, 0.85) {
 		episode := &Episode{
 			Entry:Entry{
 				Id:      episode_details.ID,
@@ -225,20 +220,6 @@ func get_episode(path string, series *Series, season, episodenum int64) (*Episod
 	return nil, errors.New("File length doesn't match tmdb file length")
 }
 
-type FileInfo struct {
-	Title string
-	Year int
-	Screen_size string
-	Source string
-	Other string
-	Codec string
-	Release_group string
-	Season int64
-	Episode int64
-	Group string
-	Mimetype string
-	Type string
-}
 
 // this might be slow but it works for now
 func myguessit(path string) (*FileInfo, error) {
@@ -255,29 +236,19 @@ func myguessit(path string) (*FileInfo, error) {
 	}
 	return &fileinfo, nil
 }
-// we need a helper function
+
+var filetype []string = []string{"mkv", "avi", "mp4", "mov", "wmv", "peg"}
+
+func fileExtentison(path string) bool {
+	for _, ext := range filetype {
+		if len(path) > 3 && path[len(path)-3:] == ext {
+			return true
+		}
+	}
+	return false
+}
+
 func walker(db *gorm.DB, path string) {
-	stat, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("Bad path: %s\n", path)
-		return
-	}
-	updatetime := stat.ModTime()
-	last_update, entry := db_get_pathinfo(db, path)
-	fmt.Printf("Mod time: %-v\n", updatetime)
-	fmt.Printf("Last time: %-v\n", last_update)
-	if entry && !last_update.Before(updatetime) {
-		return
-	}
-	diretory := &Directory{
-		Path: path,
-		Mtime: updatetime,
-	}
-	if entry {
-		db.Create(diretory)
-	} else {
-		db.Save(diretory)
-	}
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
@@ -291,6 +262,9 @@ func walker(db *gorm.DB, path string) {
 		if stat.IsDir() {
 			walker(db, newpath)
 		} else {
+			if !fileExtentison(newpath) {
+				continue
+			}
 			// XXX add logging!
 			guessed, err := myguessit(f.Name())
 			if err != nil {
@@ -326,13 +300,34 @@ func walker(db *gorm.DB, path string) {
 	}
 }
 
+func del(db *gorm.DB, path string) {
+	var episode Episode
+	if err := db.First(&episode, "path = ?", path).Error; err == nil {
+		episode.Deleted = true
+		db.Save(&episode)
+		if filesystem {
+			os.Remove(path)
+		}
+	}
+	var movie Movie
+	if err := db.First(&movie, "path = ?", path).Error; err == nil {
+		episode.Deleted = true
+		db.Save(&movie)
+		if filesystem {
+			os.Remove(path)
+		}
+	}
+}
+
+var LuaPath string
+
 func Conf() *Config {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(xdg.ConfigHome + "/movix/")
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
-	// viper.SetDefault("LuaPluginPath", "/home/dagle/code/govix/movix.lua")
+	viper.SetDefault("LuaPluginPath", LuaPath)
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -345,12 +340,10 @@ func Conf() *Config {
 	}
 	stat, err := os.Stat(conf.Mediapath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		log.Fatal(err)
 	}
 	if !stat.IsDir() {
-		fmt.Fprintln(os.Stderr, "Mediapath \"%s\" isn't a directory", conf.Mediapath)
-		os.Exit(2)
+		log.Fatal(err)
 	}
 	if conf.Dbpath == "" {
 		conf.Dbpath = xdg.ConfigHome + "/movix/" + "movix.db"
@@ -372,19 +365,14 @@ func watchusage() {
 }
 
 // can we pass in a string?
-// XXX these should be able search multiple tables?
 func get_next_tv(db *gorm.DB) (*Episode, error) {
 	var episode Episode
-	// Might be correct, first try?
 	err := db.Joins("Series").
 		Where("watched = ? and Series__subscribed = ? and deleted = ?", false, true, false).
 		Order("Series__last_watched, season, part").
 		First(&episode).
 		Error
-	if err != nil {
-		panic("sql error")
-	}
-	return &episode, nil
+	return &episode, err
 }
 
 // do we even want this function? Can't we just do head?
@@ -396,31 +384,24 @@ func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 		Group("Series.id").
 		Find(&episodes).
 		Error
-	if err != nil {
-		panic("sql error")
-	}
-	return episodes, nil
+	return episodes, err
 }
 
 func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
 	var movies []Movie
 	err := db.
 		Where("watched = ? and deleted = ?", false, false).
-		// Order("").
 		Find(&movies).
 		Error
-	if err != nil {
-		panic("sql error")
-	}
-	return movies, nil
+	return movies, err
 }
 
-func play_file(db *gorm.DB, path string, conf *Config) () {
+func play_file(db *gorm.DB, path string, conf *Config) {
 	var episode Episode
 	err := db.First(&episode, "path = ?", path).
 		Error
 	if err != nil {
-		panic("sql error")
+		panic("Error exucting sql")
 	}
 	episode.play(conf)
 }
@@ -438,11 +419,90 @@ func (entry *Entry) show() {
 	fmt.Printf("%s %f %s\n", entry.Path, entry.Offset, entry.Name)
 }
 
+type Mediatype int64
+
+const (
+	none Mediatype = iota
+	tv 
+	movie
+)
+
+var errnoMatch error = errors.New("couldn't find a Mediatype")
+
+/// Tries to find media file to determine what kind of content we have 
+/// (movie, tv, etc) from the filename. Once it found one, it will report the whole
+/// collection of being that.
+func findType(path string) (Mediatype, error) {
+	files, err := ioutil.ReadDir(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Name()[0] == '.' {
+			continue
+		}
+		newpath := filepath.Join(path, f.Name())
+		stat, err := os.Stat(newpath)
+		if err != nil {
+			return none, err
+		}
+		if stat.IsDir() {
+			i, e := findType(newpath)
+			if e == nil {
+				return i, nil
+			}
+		} else {
+			if !fileExtentison(newpath) {
+				continue
+			}
+			guessed, err := myguessit(f.Name())
+			if err != nil {
+				continue
+			}
+			// we need suport for things like vods
+			if len(guessed.Mimetype) < 5 || guessed.Mimetype[:5] != "video" {
+				continue
+			}
+			switch guessed.Type {
+			case "movie":
+				return movie, nil 
+			case "episode":
+				return tv, nil
+			}
+		}
+	}
+	return none, errnoMatch
+}
+
+func sort(conf *Config, path string) error{
+	mt, e := findType(path)
+	if e != nil {
+		log.Fatal("Can't add file")
+	}
+	var dir string
+	switch mt {
+	case tv:
+		dir = "tv/"
+	case movie:
+		dir = "movies/"
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// fmt.Println(conf.Mediapath + dir + stat.Name())
+	return os.Rename(path, conf.Mediapath + dir + stat.Name())
+}
+
+var filesystem bool
+var logging bool
+
 func main() {
 	flag.Usage = useage
 	// flag.String("search", "", "A search to filter out")
 	sqllog := flag.Bool("q", false, "Log sql queries to output")
 	flag.BoolVar(&logging, "l", false, "Turn on logging")
+	flag.BoolVar(&filesystem, "f", true, "Disable filesystem actions")
 	flag.Parse()
 
 	args := flag.Args()
@@ -464,13 +524,25 @@ func main() {
 	}
 	switch args[0] {
 	case "create":
+	case "add":
+		if len(args) != 2 {
+			panic("Sorts needs a filepath")
+		}
+		walker(db, args[1])
+	case "sort":
+		if len(args) != 2 {
+			panic("Sorts needs a filepath")
+		}
+		e := sort(conf, args[1])
+		if e != nil {
+			log.Fatal(e)
+		}
 	case "play":
 		if len(args) != 2 {
 			panic("play needs a filename")
 		}
 		play_file(db, args[1], conf)
-	case "new":
-		db.AutoMigrate(&Directory{})
+	case "rescan":
 		db.AutoMigrate(&Episode{})
 		db.AutoMigrate(&Series{})
 		db.AutoMigrate(&Movie{})
@@ -485,7 +557,7 @@ func main() {
 			watchusage()
 		}
 		// should be able to take an id?
-		update_watched(db, conf, args[1], s)
+		updateWatched(db, conf, args[1], s)
 	case "next":
 		entry, _ := get_next_tv(db)
 		entry.play(conf)
