@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 
 	"io/ioutil"
 	"log"
@@ -173,7 +174,16 @@ func get_series(title string) (*Series, error) {
 	if err != nil {
 		return nil, err
 	}
+	// compare
+	lowname := strings.ToLower(title)
 	id := search.Results[0].ID
+	// XXX this feels like a hack
+	for _, r := range search.Results {
+		if strings.ToLower(r.Name) == lowname || strings.ToLower(r.OriginalName) == lowname {
+			id = r.ID
+			break;
+		}
+	}
 	show_details, err := tmdbClient.GetTVDetails(int(id), nil)
 	if err != nil {
 		return nil, err
@@ -225,10 +235,7 @@ func get_episode(path string, series *Series, season, episodenum int64) (*Episod
 	return nil, errors.New("file length doesn't match tmdb file length")
 }
 
-
-// this might be slow but it works for now
 func myguessit(path string) (*FileInfo, error) {
-	// port it later
 	out, err := exec.Command("guessit", "-j", path).Output();
 	if err != nil {
 		fmt.Println(err)
@@ -270,7 +277,6 @@ func walker(db *gorm.DB, path string) {
 			if !fileExtentison(newpath) {
 				continue
 			}
-			// XXX add logging!
 			guessed, err := myguessit(f.Name())
 			if err != nil {
 				continue
@@ -408,7 +414,6 @@ func get_nexts_movie(db *gorm.DB) ([]Movie, error) {
 }
 
 func play_file(db *gorm.DB, path string, conf *Config) {
-	// var entry Entry 
 	var entry Entry
 	err := db.First(&entry, "path = ?", path).
 		Error
