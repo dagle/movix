@@ -34,10 +34,8 @@ movix rescan
 Will go over all your files and try to add them
 
 Later on you can call:
-
 ```
 movix add directory
-
 ```
 OBS! Only add collection(like 1 tv-series) at the time with add and not a full library. Use rescan for that.
 
