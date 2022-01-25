@@ -404,10 +404,11 @@ func get_nexts_tv(db *gorm.DB) ([]Episode, error) {
 	return episodes, err
 }
 
+/// We want something more general.
 func skipUntil(db *gorm.DB, name string, season, episode int) error {
 	var episodes []Episode
 	err := db.Joins("Series").Joins("Entry").
-		Where("Series.name = ? and season < ?", name, season).
+		Where("Series.name = ? and season < ? or (season = ? and part < ?)", name, season, season, episode).
 		Find(&episodes).
 		Error
 
@@ -418,15 +419,21 @@ func skipUntil(db *gorm.DB, name string, season, episode int) error {
 		e.Entry.Watched = true
 		db.Save(&e.Entry)
 	}
-	err2 := db.Joins("Series").Joins("Entry").
-		Where("Series.name = ? and season = ? and episode < ?", name, season, episode).
-		Find(&episodes).Update("watched", true).
+	return nil
+}
+
+func unmarkAfter(db *gorm.DB, name string, season, episode int) error {
+	var episodes []Episode
+	err := db.Joins("Series").Joins("Entry").
+		Where("Series.name = ? and season > ? or (season = ? and part > ?)", name, season, season, episode).
+		Find(&episodes).
 		Error
-	if err2 != nil {
+
+	if err != nil {
 		return err
 	}
 	for _, e := range episodes {
-		e.Entry.Watched = true
+		e.Entry.Watched = false
 		db.Save(&e.Entry)
 	}
 	return nil
