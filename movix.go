@@ -350,7 +350,7 @@ func Conf() *Config {
 		log.Fatal(err)
 	}
 	if conf.Dbpath == "" {
-		conf.Dbpath = xdg.ConfigHome + "/movix/" + "movix.db"
+		conf.Dbpath = conf.Mediapath + ".movix.db"
 
 	}
 	return &conf
