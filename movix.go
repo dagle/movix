@@ -39,6 +39,7 @@ type Entry struct {
 	Deleted bool
 	Watched bool
 	Watched_date time.Time
+	// Kind String can we use an enum?
 }
 
 type Movie struct {
@@ -482,70 +483,6 @@ const (
 
 var errnoMatch error = errors.New("couldn't find a Mediatype")
 
-/// Tries to find media file to determine what kind of content we have 
-/// (movie, tv, etc) from the filename. Once it found one, it will report the whole
-/// collection of being that.
-func findType(path string) (Mediatype, error) {
-	files, err := ioutil.ReadDir(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, f := range files {
-		if f.Name()[0] == '.' {
-			continue
-		}
-		newpath := filepath.Join(path, f.Name())
-		stat, err := os.Stat(newpath)
-		if err != nil {
-			return none, err
-		}
-		if stat.IsDir() {
-			i, e := findType(newpath)
-			if e == nil {
-				return i, nil
-			}
-		} else {
-			if !fileExtentison(newpath) {
-				continue
-			}
-			guessed, err := myguessit(f.Name())
-			if err != nil {
-				continue
-			}
-			// we need suport for things like vods
-			if len(guessed.Mimetype) < 5 || guessed.Mimetype[:5] != "video" {
-				continue
-			}
-			switch guessed.Type {
-			case "movie":
-				return movie, nil 
-			case "episode":
-				return tv, nil
-			}
-		}
-	}
-	return none, errnoMatch
-}
-
-func sort(conf *Config, path string) error{
-	mt, e := findType(path)
-	if e != nil {
-		log.Fatal("Can't add file")
-	}
-	var dir string
-	switch mt {
-	case tv:
-		dir = "tv/"
-	case movie:
-		dir = "movies/"
-	}
-	stat, err := os.Stat(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return os.Rename(path, conf.Mediapath + dir + stat.Name())
-}
-
 func createDirs(conf *Config) {
 	// add more to this later
 	dirs := []string{"/tv", "/movies"}
@@ -587,17 +524,9 @@ func main() {
 		createDirs(conf)
 	case "add":
 		if len(args) != 2 {
-			panic("Sorts needs a filepath")
+			panic("Add needs a filepath")
 		}
 		walker(db, args[1])
-	case "sort":
-		if len(args) != 2 {
-			panic("Sorts needs a filepath")
-		}
-		e := sort(conf, args[1])
-		if e != nil {
-			log.Fatal(e)
-		}
 	case "play":
 		if len(args) != 2 {
 			panic("play needs a filename")
@@ -645,7 +574,7 @@ func main() {
 		}
 	case "skip":
 		if len(args) != 4 {
-			log.Fatal("Skip needs 3 arguments")
+			log.Fatal("Skip needs 3 arguments: show season episode")
 		}
 		season, err := strconv.Atoi(args[2])
 		episode, err2 := strconv.Atoi(args[3])
