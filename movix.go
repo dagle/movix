@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"strings"
 
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"math"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	tmdb "github.com/cyruzin/golang-tmdb"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
@@ -27,7 +27,9 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-const APIKEY = "e130a499c97798cfac3ffb5d0e2cc1be"
+var LuaPath string
+// Add this to the makefile etc
+var APIKEY string = "e130a499c97798cfac3ffb5d0e2cc1be"
 
 type Entry struct {
 	Id int64
@@ -40,32 +42,6 @@ type Entry struct {
 	Watched bool
 	Watched_date time.Time
 	// Kind String can we use an enum?
-}
-
-type Movie struct {
-	gorm.Model
-	EntryID int64
-	Entry Entry
-}
-
-type Episode struct {
-	gorm.Model
-	Part int64
-	Season int64
-	SeriesId int
-	Series Series
-	EntryID int
-	Entry Entry
-};
-
-type Series struct {
-	Id int
-	Name string
-	LastWatched time.Time // to keep the episode in oder
-	Prio int // maybe in the future, 
-	Subscribed bool
-	// LastEpisode int
-	// more stuff to come
 }
 
 type FileInfo struct {
@@ -85,6 +61,7 @@ type FileInfo struct {
 
 type Config struct {
 	Mediapath string
+	Perm fs.FileMode
 	Dbpath string
 	Treshhold float64
 	LuaPluginPath string
@@ -132,109 +109,6 @@ func updateWatched(db *gorm.DB, config *Config, path string, watched_amount floa
 	db.Save(&entry)
 }
 
-func get_movie(path, title string) (*Movie, error) {
-	tmdbClient, err := tmdb.Init(APIKEY)
-	if err != nil {
-		return nil, err
-	}
-	search, err := tmdbClient.GetSearchMovies(title, nil)
-	if err != nil {
-		return nil, err
-	}
-	id := search.Results[0].ID
-	movie_details, err := tmdbClient.GetMovieDetails(int(id), nil)
-	if err != nil {
-		return nil, err
-	}
-	length := get_filelength(path)
-	if almostEqual(length / 60, float64(movie_details.Runtime), 0.85) {
-		movie := &Movie {
-			Entry:Entry {
-				Id: movie_details.ID,
-				Path:    path,
-				Length:  length,
-				Name:    movie_details.Title,
-				Added:   time.Now(),
-				Deleted: false,
-				Offset:  0,
-				Watched: false,
-			},
-			EntryID: movie_details.ID,
-		}
-		return movie, nil
-	}
-	return nil, errors.New("file length doesn't match tmdb file length")
-}
-
-func get_series(title string) (*Series, error) {
-	tmdbClient, err := tmdb.Init(APIKEY)
-	if err != nil {
-		return nil, err
-	}
-	search, err := tmdbClient.GetSearchTVShow(title, nil)
-	if err != nil {
-		return nil, err
-	}
-	// compare
-	lowname := strings.ToLower(title)
-	id := search.Results[0].ID
-	// XXX this feels like a hack
-	for _, r := range search.Results {
-		if strings.ToLower(r.Name) == lowname || strings.ToLower(r.OriginalName) == lowname {
-			id = r.ID
-			break;
-		}
-	}
-	show_details, err := tmdbClient.GetTVDetails(int(id), nil)
-	if err != nil {
-		return nil, err
-	}
-	series := &Series {
-		Id: int(id),
-		Name: show_details.Name,
-		Subscribed: true,
-		// LastEpisode: show_details.LastEpisodeToAir.EpisodeNumber,
-	}
-	return series, nil
-}
-
-func get_episode(path string, series *Series, season, episodenum int64) (*Episode, error) {
-	tmdbClient, err := tmdb.Init(APIKEY)
-	if err != nil {
-		return nil, err
-	}
-
-	show_details, err := tmdbClient.GetTVDetails(series.Id, nil)
-	if err != nil {
-		return nil, err
-	}
-	episode_details, err := tmdbClient.GetTVEpisodeDetails(series.Id, int(season), int(episodenum), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	length := get_filelength(path)
-	if episodeAlmostEqual(length / 60, show_details.EpisodeRunTime, 0.85) {
-		episode := &Episode{
-			Entry:Entry{
-				Id:      episode_details.ID,
-				Path:    path,
-				Length:  length,
-				Name:    show_details.Name,
-				Added:   time.Now(),
-				Deleted: false,
-				Offset:  0,
-				Watched: false,
-			},
-			Part:    episodenum,
-			Season:  season,
-			SeriesId: series.Id,
-			Series: *series,
-		}
-		return episode, nil
-	}
-	return nil, errors.New("file length doesn't match tmdb file length")
-}
 
 func myguessit(path string) (*FileInfo, error) {
 	out, err := exec.Command("guessit", "-j", path).Output();
@@ -261,7 +135,8 @@ func fileExtentison(path string) bool {
 	return false
 }
 
-func walker(db *gorm.DB, path string) {
+// check 
+func walker(db *gorm.DB, conf *Config, path string) {
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
 		log.Fatal(err)
@@ -273,7 +148,7 @@ func walker(db *gorm.DB, path string) {
 		newpath := filepath.Join(path, f.Name())
 		stat, _ := os.Stat(newpath)
 		if stat.IsDir() {
-			walker(db, newpath)
+			walker(db, conf, newpath)
 		} else {
 			if !fileExtentison(newpath) {
 				continue
@@ -293,18 +168,19 @@ func walker(db *gorm.DB, path string) {
 				if err != nil {
 					continue
 				}
-				// XXX do we need to make this updateadble?
+				movie.Move(conf, guessed.Codec)
+				
 				db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
 			case "episode":
 				series, err := get_series(guessed.Title)
 				if err != nil {
 					continue
 				}
-				episode, err := get_episode(newpath, series, guessed.Season, guessed.Episode)
+				episode, err := series.get_episode(newpath, guessed.Season, guessed.Episode)
 				if err != nil {
 					continue
 				}
-				// XXX do we need to make this updateadble?
+				episode.Move(conf, guessed.Codec)
 				db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
 				db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
 			}
@@ -312,26 +188,28 @@ func walker(db *gorm.DB, path string) {
 	}
 }
 
-func del(db *gorm.DB, path string) {
-	var entry Entry 
-	if err := db.First(&entry, "path = ?", path).Error; err == nil {
-		entry.Deleted = true
-		db.Save(&entry)
-		if filesystem {
-			os.Remove(path)
-		}
-	}
-}
+// func del(db *gorm.DB, path string) {
+// 	var entry Entry 
+// 	if err := db.First(&entry, "path = ?", path).Error; err == nil {
+// 		entry.Deleted = true
+// 		db.Save(&entry)
+// 		if filesystem {
+// 			os.Remove(path)
+// 		}
+// 	}
+// }
 
-var LuaPath string
+// We set thing from the Makefile
 
-func Conf() *Config {
+func Conf(configpath, dbpath string) *Config {
 	viper.SetConfigName("config")
-	viper.AddConfigPath(xdg.ConfigHome + "/movix/")
+	viper.AddConfigPath(configpath)
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
 	viper.SetDefault("LuaPluginPath", LuaPath + "/movix.lua")
+	viper.SetDefault("Perm", 664)
+	viper.SetDefault("Mediapath", xdg.UserDirs.Videos + "/movix")
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -349,10 +227,12 @@ func Conf() *Config {
 	if !stat.IsDir() {
 		log.Fatal(err)
 	}
-	if conf.Dbpath == "" {
-		conf.Dbpath = conf.Mediapath + ".movix.db"
-
+	if dbpath != "" {
+		conf.Dbpath = dbpath
+	} else if conf.Dbpath == "" {
+		conf.Dbpath = conf.Mediapath + "/.movix.db"
 	}
+
 	return &conf
 }
 
@@ -483,23 +363,68 @@ const (
 
 var errnoMatch error = errors.New("couldn't find a Mediatype")
 
-func createDirs(conf *Config) {
-	// add more to this later
-	dirs := []string{"/tv", "/movies"}
-	for _, d := range dirs {
-		os.Mkdir(conf.Mediapath + d, 0755)
-	}
+func make_config(){
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Path to media library: ")
+	text, _ := reader.ReadString('\n')
+	// make a config and write it or just
+	// Mediapath: "/home/dagle/download/media/"?
+	fmt.Print(text)
 }
 
-var filesystem bool
+var directories = []string{"tv", "movies"}
+
+func add_new(conf *Config) int {
+	dbfile, err := os.Stat(conf.Dbpath)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	
+	dbtime := dbfile.ModTime()
+	fmt.Println(dbtime)
+	i := 0
+	for _, dir := range directories {
+		statfile, err := os.Stat(dir)
+		if err != nil {
+			continue
+		}
+
+		if statfile.ModTime().After(dbtime) {
+			i++
+		}
+	}
+	
+	return i
+}
+
 var logging bool
+var sqllog bool
+var dbpath string
+var confpath string
+
+const (
+	FS = iota
+	YT
+)
+
+func protocol(uri string) int {
+	return FS
+}
+
+func add_youtube(db *gorm.DB, conf *Config, uri string) {
+}
 
 func main() {
 	flag.Usage = useage
 	// flag.String("search", "", "A search to filter out")
-	sqllog := flag.Bool("q", false, "Log sql queries to output")
+	// defpath := xdg.ConfigHome + "/movix/"
+	defpath, _ := xdg.ConfigFile("movix/config")
 	flag.BoolVar(&logging, "l", false, "Turn on logging")
-	flag.BoolVar(&filesystem, "f", true, "Disable filesystem actions")
+	flag.BoolVar(&sqllog, "q", false, "Turn on sqllogging")
+	flag.StringVar(&dbpath, "d", "", "Specify database directory")
+	flag.StringVar(&confpath, "c", defpath, "Specify database directory")
+	// flag.BoolVar(&filesystem, "f", true, "Disable filesystem actions")
 	flag.Parse()
 
 	args := flag.Args()
@@ -508,9 +433,9 @@ func main() {
 	}
 
 	
-	conf := Conf()
+	conf := Conf(confpath, dbpath)
 	var gormcfg gorm.Config
-	if *sqllog {
+	if sqllog {
 		gormcfg = gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
 	} else {
 		gormcfg = gorm.Config{}
@@ -520,24 +445,31 @@ func main() {
 		panic("Couldn't open movix database")
 	}
 	switch args[0] {
-	case "create":
-		createDirs(conf)
+	case "config":
+		make_config()
 	case "add":
 		if len(args) != 2 {
 			panic("Add needs a filepath")
 		}
-		walker(db, args[1])
+		switch protocol(args[1]) {
+		case FS:
+			walker(db, conf, args[1])
+		case YT:
+			add_youtube(db, conf, args[1])
+		}
+	case "new":
+		add_new(conf)
+	case "rescan": // maybe call this migrate?
+		db.AutoMigrate(&Episode{})
+		db.AutoMigrate(&Series{})
+		db.AutoMigrate(&Movie{})
+		fmt.Printf("Media path: %s\n", conf.Mediapath)
+		walker(db, conf, conf.Mediapath)
 	case "play":
 		if len(args) != 2 {
 			panic("play needs a filename")
 		}
 		play_file(db, args[1], conf)
-	case "rescan":
-		db.AutoMigrate(&Episode{})
-		db.AutoMigrate(&Series{})
-		db.AutoMigrate(&Movie{})
-		fmt.Printf("Media path: %s\n", conf.Mediapath)
-		walker(db, conf.Mediapath)
 	case "watched":
 		if len(args) < 3 {
 			watchusage()

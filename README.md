@@ -2,6 +2,7 @@
 A database for your movies. Think a bit like netflix or plex but just the database for tracking what media you have and what you have seen.
 The idea sprang from the fact that I don't need something like plex(with transcoding etc) but I want something where I can just say play next episode.
 The media needs to formated in such a way that guessit can detect the content, it's not magic, the content needs to be named correctly.
+Idealy you should pair movix with a program that will sort your media. For this I recommend [nmamer](https://github.com/jkwill87/mnamer)
 
 TODO see the TODO file
 
