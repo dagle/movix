@@ -6,8 +6,8 @@ MANDIR := $(PREFIX)/share/man
 SCRIPT := $(PREFIX)/share/movix
 SRC = movix.go
 
-movix: ${SRC}
-	go build -ldflags "-X main.LuaPath=${SCRIPT}"
+movix:
+	go build -ldflags "-X main.LuaPath=${SCRIPT}" -o $@ ./cmd/$@
 
 install: movix
 	install -Dm755 movix -t '$(DESTDIR)$(BINDIR)'

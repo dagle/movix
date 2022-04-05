@@ -1,4 +1,4 @@
-module movix
+module github.com/dagle/movix
 
 go 1.18
 
