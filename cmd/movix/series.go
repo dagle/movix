@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -114,6 +115,7 @@ func (episode *Episode) Move(conf *Config, codec string) error {
 	dir := conf.Mediapath + "/tv/" + episode.Series.Name + "/" + ep
 	os.MkdirAll(dir, conf.Perm)
 	new_path := dir + filename
+	log.Printf("Moving file %s to %s\n", episode.Entry.Path, new_path)
 	err := os.Rename(episode.Entry.Path, new_path)
 	if err != nil {
 		return err

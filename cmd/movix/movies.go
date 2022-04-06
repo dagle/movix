@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -60,6 +61,7 @@ func (movie *Movie) Move(conf *Config, codec string) error {
 	dir := conf.Mediapath + "/movies/"
 	os.MkdirAll(dir, conf.Perm)
 	new_path := dir + filename
+	log.Printf("Moving file %s to %s\n", movie.Entry.Path, new_path)
 	err := os.Rename(movie.Entry.Path, new_path)
 	if err != nil {
 		return err
