@@ -6,9 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"regexp"
 
 	"io/fs"
-	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -135,57 +135,43 @@ func fileExtentison(path string) bool {
 	return false
 }
 
-// check 
 func walker(db *gorm.DB, conf *Config, path string) {
-	files, err := ioutil.ReadDir(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, f := range files {
-		if f.Name()[0] == '.' {
-			continue
+	filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
+		if !fileExtentison(path) {
+			return nil
 		}
-		newpath := filepath.Join(path, f.Name())
-		stat, _ := os.Stat(newpath)
-		if stat.IsDir() {
-			walker(db, conf, newpath)
-		} else {
-			if !fileExtentison(newpath) {
-				continue
-			}
-			guessed, err := myguessit(f.Name())
+		guessed, err := myguessit(path)
+		if err != nil {
+			return nil
+		}
+		if len(guessed.Mimetype) < 5 || guessed.Mimetype[:5] != "video" {
+			return nil
+		}
+		log.Printf("Adding file: %s\n", path)
+		switch guessed.Type {
+		case "movie":
+			movie, err := get_movie(path, guessed.Title)
 			if err != nil {
-				continue
+				return nil
 			}
-			// we need suport for things like vods
-			if len(guessed.Mimetype) < 5 || guessed.Mimetype[:5] != "video" {
-				continue
+			movie.Move(conf, guessed.Codec)
+
+			db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
+		case "episode":
+			series, err := get_series(guessed.Title)
+			if err != nil {
+				return nil
 			}
-			log.Printf("Adding file: %s\n", newpath)
-			switch guessed.Type {
-			case "movie":
-				movie, err := get_movie(newpath, guessed.Title)
-				if err != nil {
-					continue
-				}
-				movie.Move(conf, guessed.Codec)
-				
-				db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
-			case "episode":
-				series, err := get_series(guessed.Title)
-				if err != nil {
-					continue
-				}
-				episode, err := series.get_episode(newpath, guessed.Season, guessed.Episode)
-				if err != nil {
-					continue
-				}
-				episode.Move(conf, guessed.Codec)
-				db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
-				db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
+			episode, err := series.get_episode(path, guessed.Season, guessed.Episode)
+			if err != nil {
+				return nil
 			}
+			episode.Move(conf, guessed.Codec)
+			db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
+			db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
 		}
-	}
+		return nil
+	})
 }
 
 // func del(db *gorm.DB, path string) {
@@ -406,13 +392,19 @@ var confpath string
 const (
 	FS = iota
 	YT
+	URL
 )
 
 func protocol(uri string) int {
+	match, err := regexp.MatchString(`\w+://`, uri)
+	if err == nil && match {
+		yt, err2 := regexp.MatchString(`youtu`, uri)
+		if err2 == nil && yt {
+			return YT
+		}
+		return URL
+	}
 	return FS
-}
-
-func add_youtube(db *gorm.DB, conf *Config, uri string) {
 }
 
 func main() {
