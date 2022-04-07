@@ -19,7 +19,7 @@ type Episode struct {
 	Season int64
 	SeriesId int
 	Series Series
-	EntryID int
+	EntryID int64
 	Entry Entry
 };
 
@@ -65,7 +65,7 @@ func get_series(title string) (*Series, error) {
 	return series, nil
 }
 
-func (series *Series) get_episode(path string, season, episodenum int64) (*Episode, error) {
+func (series *Series) get_episode(path string, season, episodenum int64, treshhold float64) (*Episode, error) {
 	tmdbClient, err := tmdb.Init(APIKEY)
 	if err != nil {
 		return nil, err
@@ -81,7 +81,7 @@ func (series *Series) get_episode(path string, season, episodenum int64) (*Episo
 	}
 
 	length := get_filelength(path)
-	if episodeAlmostEqual(length / 60, show_details.EpisodeRunTime, 0.85) {
+	if episodeAlmostEqual(length / 60, show_details.EpisodeRunTime, treshhold) {
 		episode := &Episode{
 			Entry:Entry{
 				Id:      episode_details.ID, // we shouldn't really do this

@@ -64,7 +64,9 @@ type Config struct {
 	Perm fs.FileMode
 	Dbpath string
 	Treshhold float64
+	MatchLength float64
 	LuaPluginPath string
+	Move bool
 }
 
 func get_filelength(path string) float64 {
@@ -136,7 +138,7 @@ func fileExtentison(path string) bool {
 }
 
 func walker(db *gorm.DB, conf *Config, path string) {
-	filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(path, func(path string, d fs.DirEntry, fileerr error) error {
 		if !fileExtentison(path) {
 			return nil
 		}
@@ -150,11 +152,13 @@ func walker(db *gorm.DB, conf *Config, path string) {
 		log.Printf("Adding file: %s\n", path)
 		switch guessed.Type {
 		case "movie":
-			movie, err := get_movie(path, guessed.Title)
+			movie, err := get_movie(path, guessed.Title, conf.MatchLength)
 			if err != nil {
 				return nil
 			}
-			movie.Move(conf, guessed.Codec)
+			if conf.Move {
+				movie.Move(conf, guessed.Codec)
+			}
 
 			db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
 		case "episode":
@@ -162,11 +166,13 @@ func walker(db *gorm.DB, conf *Config, path string) {
 			if err != nil {
 				return nil
 			}
-			episode, err := series.get_episode(path, guessed.Season, guessed.Episode)
+			episode, err := series.get_episode(path, guessed.Season, guessed.Episode, conf.MatchLength)
 			if err != nil {
 				return nil
 			}
-			episode.Move(conf, guessed.Codec)
+			if conf.Move {
+				episode.Move(conf, guessed.Codec)
+			}
 			db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
 			db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
 		}
@@ -193,6 +199,8 @@ func Conf(configpath, dbpath string) *Config {
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
+	viper.SetDefault("MatchLength", 0.85)
+	viper.SetDefault("Moved", true)
 	viper.SetDefault("LuaPluginPath", LuaPath + "/movix.lua")
 	viper.SetDefault("Perm", 664)
 	viper.SetDefault("Mediapath", xdg.UserDirs.Videos + "/movix")
@@ -447,7 +455,7 @@ func main() {
 		case FS:
 			walker(db, conf, args[1])
 		case YT:
-			add_youtube(db, conf, args[1])
+			// add_youtube(db, conf, args[1])
 		}
 	case "new":
 		add_new(conf)

@@ -17,7 +17,7 @@ type Movie struct {
 	Entry Entry
 }
 
-func get_movie(path, title string) (*Movie, error) {
+func get_movie(path, title string, treshhold float64) (*Movie, error) {
 	tmdbClient, err := tmdb.Init(APIKEY)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func get_movie(path, title string) (*Movie, error) {
 		return nil, err
 	}
 	length := get_filelength(path)
-	if almostEqual(length / 60, float64(movie_details.Runtime), 0.85) {
+	if almostEqual(length / 60, float64(movie_details.Runtime), treshhold) {
 		movie := &Movie {
 			Entry:Entry {
 				Id: movie_details.ID,
