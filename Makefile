@@ -4,7 +4,7 @@ PREFIX := /usr/local
 BINDIR := $(PREFIX)/bin
 MANDIR := $(PREFIX)/share/man
 SCRIPT := $(PREFIX)/share/movix
-SRC = movix.go
+SRC = cmd/movix/main.go
 
 movix:
 	go build -ldflags "-X main.LuaPath=${SCRIPT}" -o $@ ./cmd/$@
