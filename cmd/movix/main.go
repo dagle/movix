@@ -160,11 +160,13 @@ func main() {
 			}
 		}
 		movix.RunWalkers(db, &conf.Runtime, args[1], movies, tv)
-	case "rescan": // maybe call this migrate?
+	case "migrate":
 		db.AutoMigrate(&movix.Episode{})
 		db.AutoMigrate(&movix.Series{})
 		db.AutoMigrate(&movix.Movie{})
-		fmt.Printf("Media path: %s\n", conf.Mediapath)
+		fmt.Printf("Migrated media path: %s\n", conf.Mediapath)
+	case "rescan":
+		movix.Rescan(db, &conf.Runtime, movies, tv)
 	case "watched":
 		if len(args) < 3 {
 			watchusage()
@@ -201,6 +203,6 @@ func main() {
 		if err != nil || err2 != nil {
 			log.Fatal("Arguments 3 and 4 needs to be integers")
 		}
-		movix.SkipUntil(db, args[1], season, episode, movix.Make_series())
+		movix.SkipUntil(db, args[1], int64(season), int64(episode), tv)
 	}
 }
