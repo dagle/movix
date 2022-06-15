@@ -27,7 +27,7 @@ type Episode struct {
 type Series struct {
 	Id int
 	Name string
-	LastWatched time.Time // to keep the episode in oder
+	Last_updated int64
 	Prio int // maybe in the future, 
 	Subscribed bool
 }
@@ -64,7 +64,7 @@ func get_series(title string) (*Series, error) {
 		Id: int(id),
 		Name: show_details.Name,
 		Subscribed: true,
-		// LastEpisode: show_details.LastEpisodeToAir.EpisodeNumber,
+		Last_updated: time.Now().Unix(),
 	}
 	return series, nil
 }
@@ -76,6 +76,11 @@ func episodeAlmostEqual(a float64, bs []int, threshold float64) bool {
 		}
 	}
 	return false
+}
+
+func make_name(show string, season int, episode int, name string) string {
+	return fmt.Sprintf("%s S%dE%d %s", show,
+		season, episode, name)
 }
 
 func (series *Series) get_episode(path string, season, episodenum int64, treshhold float64, verify_length bool) (*Episode, error) {
@@ -100,16 +105,19 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 			return nil, errors.New("file length doesn't match tmdb file length")
 		}
 	} 
+	now := time.Now().Unix()
 	return &Episode{
 		Entry:Entry{
 			Id:      episode_details.ID, // we shouldn't really do this
+			// RemoteId: episode_details.ID,
 			Path:    path,
 			Length:  length,
-			Name:    show_details.Name,
-			Added:   time.Now(),
+			Name:    make_name(show_details.Name, int(season), int(episodenum), episode_details.Name),
+			Added:   now,
 			Deleted: false,
 			Offset:  0,
 			Watched: false,
+			Watched_date: now, // this date is bogus but only so we can compare
 		},
 		// Add another id here
 		Part:    episodenum,
@@ -154,8 +162,9 @@ func (tv *Tv) Add(db *gorm.DB, runtime *Runtime, path string, info *FileInfo) er
 func (tv *Tv) Next(db *gorm.DB) ([]string, error) {
 	var episodes []Episode
 	err := db.Joins("Series").Joins("Entry").
-		Where("watched = ? and subscribed = ? and deleted = ?", false, true, false).
+		Where("watched = ? and deleted = ?", false, false).
 		Order("last_watched, season, part").
+		// Distinct("Series.id").
 		Group("Series.id").
 		Find(&episodes).
 		Error
@@ -182,6 +191,14 @@ func (tv *Tv) Select(db *gorm.DB, name string) (*Entry, error){
 	if err != nil {
 		return nil, err
 	}
+	var series Series
+	e := db.Where("name = ?", name).First(&series).Error
+	if e != nil {
+		return nil, e
+	}
+
+	series.Last_updated = time.Now().Unix()
+	db.Save(&series)
 
 	return &episode.Entry, nil
 }
@@ -204,7 +221,7 @@ func (tv *Tv)skipUntil(db *gorm.DB, name string, season, episode int64) error {
 	return nil
 }
 
-func (tv *Tv)unmarkAfter(db *gorm.DB, name string, season, episode int) error {
+func (tv *Tv)unmarkAfter(db *gorm.DB, name string, season, episode int64) error {
 	var episodes []Episode
 	err := db.Joins("Series").Joins("Entry").
 		Where("Series.name = ? and season > ? or (season = ? and part > ?)", name, season, season, episode).
@@ -221,13 +238,13 @@ func (tv *Tv)unmarkAfter(db *gorm.DB, name string, season, episode int) error {
 	return nil
 }
 
-func (episode *Episode) make_name(codec string) string {
+func (episode *Episode) make_fsname(codec string) string {
 	return fmt.Sprintf("%s S%dE%d %s.%s", episode.Series.Name, 
 		episode.Season, episode.Part, episode.Entry.Name, codec)
 }
 
 func (episode *Episode) Move(runtime *Runtime, codec string) error {
-	filename := episode.make_name(codec)
+	filename := episode.make_fsname(codec)
 	ep := strconv.FormatInt(episode.Season, 10)
 	dir := runtime.Mediapath + "/tv/" + episode.Series.Name + "/" + ep
 	os.MkdirAll(dir, runtime.Perm)

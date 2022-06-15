@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"math"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -70,14 +71,21 @@ type FileInfo struct {
 
 type Entry struct {
 	Id int64
+	// gorm.Model
+	// RemoteId: int64,
 	Length float64
 	Path string
 	Name string
-	Added time.Time
+	Added int64
 	Offset float64
 	Deleted bool
 	Watched bool
-	Watched_date time.Time
+	Watched_date int64
+}
+
+type Deleteable struct {
+	Path string
+	Rank float64
 }
 
 func (entry *Entry) String() string{
@@ -125,6 +133,15 @@ func RunWalkers(db *gorm.DB, runtime *Runtime, path string, walkers ...FsProduce
 	})
 }
 
+// TODO
+func Rescan(db *gorm.DB, runtime *Runtime, walkers ...FsProducer) error {
+	return filepath.WalkDir(runtime.Mediapath, func(path string, 
+		d fs.DirEntry, fileerr error) error {
+			// get a list of all matches
+			// get a list of all entries in db
+			return nil
+	})
+}
 
 func UpdateWatched(db *gorm.DB, runtime *Runtime, path string, watched_amount float64, full bool) error {
 	var entry Entry 
@@ -136,7 +153,7 @@ func UpdateWatched(db *gorm.DB, runtime *Runtime, path string, watched_amount fl
 	if full || ((watched_amount / entry.Length) > runtime.Treshhold) {
 		entry.Offset = 0
 		entry.Watched = true
-		entry.Watched_date = time.Now()
+		entry.Watched_date = time.Now().Unix()
 	} else {
 		entry.Offset = watched_amount
 	}
@@ -173,6 +190,89 @@ func get_filelength(path string) float64 {
 	}
 	totalDuration := gjson.Get(a, "format.duration").Float()
 	return totalDuration
+}
+
+// How do we handle criteria?
+// What do we return?
+// "How long haven't I watched this"
+
+// idle-time
+// unixepoch-watched_date, 6 months => 1000 points
+
+// left-time TODO
+// normalize -(offset/length)
+
+// Burst-time TODO
+// nomalize -(date-watch_date) 
+func Suggest_deletions(db *gorm.DB) ([]string, error) {
+	ret := []string{}
+	var entries []Entry
+	past := time.Now().AddDate(0, -6, 0).Unix()
+	err := db.Where("watched_date >= ? or (watched = ? and deleted = ?)", past, false, true).
+		Order("watched_date").
+		Find(&entries).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return ret, nil
+}
+func Suggest_groups(db *gorm.DB) ([]string, error) {
+	var episodes []Episode
+	err := db.Joins("Series").Joins("Entry").
+		Where("watched = ? and deleted = ?", true, false).
+		Order("last_watched, season, part").
+		// Distinct("Series.id").
+		Group("Series.id").
+		Find(&episodes).
+		Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, e := range episodes {
+		names = append(names, e.Series.Name)
+	}
+	return names, nil
+}
+
+func Delete_group(db *gorm.DB, names []string) error {
+	var entries []Entry
+	for _, name := range(names) {
+		err := db.Joins("Series").Joins("Episode").
+		Where("deleted = ? and Series.name = ?", false, name).
+		Find(&entries).
+		Error
+		if err != nil {
+			return err
+		}
+		for _, entry := range(entries) {
+			if err := os.Remove(entry.Path); err != nil {
+				return err
+			}
+			entry.Deleted = true;
+			db.Save(&entry)
+		}
+	}
+	return nil
+}
+
+func Delete(db *gorm.DB, paths []string) error {
+	for _, path := range(paths) {
+		var entry Entry
+		err := db.Where("path = ?", path).First(&entry).Error
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+		entry.Deleted = true;
+		db.Save(&entry)
+	}
+	return nil
 }
 
 func almostEqual(a, b, threshold float64) bool {

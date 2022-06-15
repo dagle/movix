@@ -44,16 +44,18 @@ func get_movie(path, title string, runtime *Runtime) (*Movie, error) {
 			return nil, errors.New("file length doesn't match tmdb file length")
 		}
 	} 
+	now := time.Now().Unix()
 	return &Movie {
 		Entry:Entry {
 			Id: movie_details.ID,
 			Path:    path,
 			Length:  length,
 			Name:    movie_details.Title,
-			Added:   time.Now(),
+			Added:   now,
 			Deleted: false,
 			Offset:  0,
 			Watched: false,
+			Watched_date: now, // this date is bogus but only so we can compare
 		},
 		EntryID: movie_details.ID,
 	}, nil
@@ -105,7 +107,7 @@ func (m *Movies) Next(db *gorm.DB) ([]string, error){
 
 func (m *Movies) Select(db *gorm.DB, name string) (*Entry, error){
 	var entry Entry
-	err := db. Where("watched = ? and deleted = ? and name = ?", false, false, name).
+	err := db.Where("watched = ? and deleted = ? and name = ?", false, false, name).
 		First(&entry).
 		Error
 	if err != nil {
@@ -115,12 +117,12 @@ func (m *Movies) Select(db *gorm.DB, name string) (*Entry, error){
 }
 
 // maybe escape filenames etc
-func (movie *Movie) make_name(codec string) string {
+func (movie *Movie) make_fsname(codec string) string {
 	return fmt.Sprintf("%s.%s", movie.Entry.Name, codec)
 }
 
 func (movie *Movie) move(runtime *Runtime, codec string) error {
-	filename := movie.make_name(codec)
+	filename := movie.make_fsname(codec)
 	dir := runtime.Mediapath + "/movies/"
 	os.MkdirAll(dir, runtime.Perm)
 	new_path := dir + filename

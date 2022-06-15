@@ -118,15 +118,16 @@ func TestMove(t *testing.T){
 
 // can we make this fuzzy?
 func test_entry() *movix.Entry {
+	now := time.Now().Unix()
 	return &movix.Entry{
 		Id: 7,
 		Length: 98,
 		Path: "testpath.mkv",
-		Added: time.Now(),
+		Added: now,
 		Offset: 0,
 		Deleted: false,
 		Watched: false,
-		Watched_date: time.Now(),
+		Watched_date: now,
 	}
 }
 
@@ -188,7 +189,7 @@ func test_series() *movix.Series{
 	return &movix.Series{
 		Id: 22,
 		Name: "Alias",
-		LastWatched: time.Now(),
+		Last_updated: time.Now().Unix(),
 		Prio: 3,
 		Subscribed: true,
 	}
