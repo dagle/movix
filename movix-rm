@@ -1,0 +1,4 @@
+#!/bin/sh
+
+MF=$(movix suggestdel | fzf -m)
+movix delete "$MF"
