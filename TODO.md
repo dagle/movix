@@ -1,12 +1,15 @@
 * Bugs 
 - [x] Fix bug with guessit and filename?
 - [ ] Running more than 1 test
+- [ ] Move the database away from config directory
 
 * 0.1 movix.go 
+  - [ ] Delete (and suggest files for deletion)
+
   - [x] Write a basic test suit
   - [-] Support searches
   - [ ] Write transmission script
-  - [ ] Move support
+  - [x] Move support
   - [x] Deleting files should mark them as deleted in the db
   - [x] Cleaning up the code.
   - [x] Split the code into different files
@@ -23,13 +26,14 @@
 - [x] Package it so it's easier for others to install
 
 * 0.2
+  - [ ] A way to suggest moving of the content. That way we don't need to stop the torrent and we don't need "delete" things.
+  -- We just ask for a path, lets transmission move to that path and add that path
   (- [ ] Write a guessit in go (for a speedup))
   - [ ] Sync
-  - [ ] Delete (and suggest files for deletion)
   - [ ] Transfer?
-  - [ ] Undo
-  - [ ] A run-or-bring mode
-  - [ ] Tag support
+  - [ ] Undo?
+  - [ ] A run-or-bring mode(?, this is mainly the wm?)
+  - [ ] Tag support (like: edu, comedy etc)
   -- [ ] Tag based searching
 
   -- [ ] Support vods
