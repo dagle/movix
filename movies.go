@@ -117,20 +117,20 @@ func (m *Movies) Select(db *gorm.DB, name string) (*Entry, error){
 }
 
 // maybe escape filenames etc
-func (movie *Movie) make_fsname(codec string) string {
-	return fmt.Sprintf("%s.%s", movie.Entry.Name, codec)
+func (m *Movie) make_fsname(codec string) string {
+	return fmt.Sprintf("%s.%s", m.Entry.Name, codec)
 }
 
-func (movie *Movie) move(runtime *Runtime, codec string) error {
-	filename := movie.make_fsname(codec)
+func (m *Movie) Move(runtime *Runtime, codec string) error {
+	filename := m.make_fsname(codec)
 	dir := runtime.Mediapath + "/movies/"
 	os.MkdirAll(dir, runtime.Perm)
 	new_path := dir + filename
-	log.Printf("Moving file %s to %s\n", movie.Entry.Path, new_path)
-	err := os.Rename(movie.Entry.Path, new_path)
+	log.Printf("Moving file %s to %s\n", m.Entry.Path, new_path)
+	err := os.Rename(m.Entry.Path, new_path)
 	if err != nil {
 		return err
 	}
-	movie.Entry.Path = new_path
+	m.Entry.Path = new_path
 	return nil
 }
