@@ -4,6 +4,8 @@ import (
 	"os"
 	"time"
 
+	// "time"
+
 	"testing"
 
 	"github.com/dagle/movix"
@@ -12,17 +14,17 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func TestMakeConfig(t *testing.T) {
-    t.Run("Make a config and read it back", func(t *testing.T) {
-		dir := t.TempDir()
-		conf := Conf(dir, "")
-		make_config(dir, conf)
-		conf2 := Conf(dir, "")
-		if conf == conf2 {
-			t.Fail()
-		}
-    })
-}
+// func TestMakeConfig(t *testing.T) {
+//     t.Run("Make a config and read it back", func(t *testing.T) {
+// 		dir := t.TempDir()
+// 		conf := Conf(dir, "")
+// 		make_config(dir, conf)
+// 		conf2 := Conf(dir, "")
+// 		if conf == conf2 {
+// 			t.Fail()
+// 		}
+//     })
+// }
 
 func test_config() *movix.Runtime {
 	return &movix.Runtime{
@@ -57,6 +59,10 @@ var paths []string = []string{
 	"Alias S01E01 Truth Be Told.avi",
 }
 
+var moviepaths string = "Bowling.for.Columbine.2002.720p.WEB-DL.H264-WEBiOS.mkv"
+
+var seriespath string = "Alias S01E01 Truth Be Told.avi"
+
 func test_dir(t *testing.T) string {
 	path := t.TempDir()
 	for _, file := range(paths) {
@@ -65,7 +71,7 @@ func test_dir(t *testing.T) string {
 
 	return path
 }
-
+//
 func verifyentries(db *gorm.DB, t*testing.T, dir string) {
 	for _, path := range(paths) {
 		uri := dir + "/" + path
@@ -96,33 +102,34 @@ func TestWalk(t *testing.T) {
 		verifyentries(db, t, dir)
 	})
 }
-
-func TestMove(t *testing.T){
-	t.Run("Add and move the files", func(t *testing.T) {
-		runtime := test_config()
-		db := test_db(t)
-		dir := test_dir(t)
-		target := t.TempDir()
-		runtime.Move = true
-		runtime.Mediapath = target
-		movies := movix.Make_movies()
-		tv := movix.Make_series()
-		err := movix.RunWalkers(db, runtime, dir, movies, tv)
-		if err != nil {
-			t.Fail()
-		}
-		verifyentries(db, t, dir)
-		// verifyentries(db, t, target)
-	})
-}
-
-// can we make this fuzzy?
+//
+// func TestMove(t *testing.T){
+// 	t.Run("Add and move the files", func(t *testing.T) {
+// 		runtime := test_config()
+// 		db := test_db(t)
+// 		dir := test_dir(t)
+// 		target := t.TempDir()
+// 		runtime.Move = true
+// 		runtime.Mediapath = target
+// 		movies := movix.Make_movies()
+// 		tv := movix.Make_series()
+// 		err := movix.RunWalkers(db, runtime, dir, movies, tv)
+// 		if err != nil {
+// 			t.Fail()
+// 		}
+// 		verifyentries(db, t, dir)
+// 		// verifyentries(db, t, target)
+// 	})
+// }
+//
+// // can we make this fuzzy?
 func test_entry() *movix.Entry {
 	now := time.Now().Unix()
 	return &movix.Entry{
 		Id: 7,
 		Length: 98,
 		Path: "testpath.mkv",
+		Name: "Test",
 		Added: now,
 		Offset: 0,
 		Deleted: false,
@@ -130,7 +137,7 @@ func test_entry() *movix.Entry {
 		Watched_date: now,
 	}
 }
-
+//
 func get_entry(db *gorm.DB, path string, t *testing.T) *movix.Entry {
 	var entry movix.Entry
 	err := db.First(&entry, "path = ?", path).Error
@@ -145,7 +152,7 @@ func TestWatched(t *testing.T) {
 		conf := test_config()
 		db := test_db(t)
 		entry := test_entry()
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(entry)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
 		movix.UpdateWatched(db, conf, entry.Path, 0, true)
 		updated := get_entry(db, entry.Path, t)
 		if !updated.Watched {
@@ -153,13 +160,13 @@ func TestWatched(t *testing.T) {
 		}
 	})
 }
-//
+
 func TestWatchedpartial(t *testing.T) {
 	t.Run("Partialy watch an entry", func(t *testing.T) {
 		conf := test_config()
 		db := test_db(t)
 		entry := test_entry()
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(entry)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
 		movix.UpdateWatched(db, conf, entry.Path, 40, false)
 		updated := get_entry(db, entry.Path, t)
 		if updated.Watched {
@@ -171,7 +178,7 @@ func TestWatchedpartial(t *testing.T) {
 	})
 }
 
-func test_episode() (*movix.Episode, *movix.Series) {
+func test_episode() (*movix.Episode, *movix.Series, *movix.Entry) {
 	entry := test_entry()
 	series := test_series()
 	episode := &movix.Episode{
@@ -182,7 +189,7 @@ func test_episode() (*movix.Episode, *movix.Series) {
 		EntryID: entry.Id,
 		Entry: *entry,
 	}
-	return episode, series
+	return episode, series, entry
 }
 
 func test_series() *movix.Series{
@@ -201,12 +208,13 @@ func compareTv(ep *movix.Episode, entry *movix.Entry) bool {
 
 func TestNextTv(t *testing.T) {
 	t.Run("Get the tv episode", func(t *testing.T) {
-		episode, series := test_episode()
+		episode, series, entry := test_episode()
 		db := test_db(t)
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
-		entry, err := movix.GetNext(db, series.Name, movix.Make_series(), movix.Make_movies())
-		
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(series)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(episode)
+		entry, err := movix.GetNext(db, series.Name, movix.Make_series())
+
 		if err != nil {
 			t.Fail()
 		}
@@ -217,12 +225,13 @@ func TestNextTv(t *testing.T) {
 	})
 }
 
-func test_movie() *movix.Movie{
+func test_movie() (*movix.Movie, *movix.Entry) {
 	entry := test_entry()
-	return &movix.Movie{
+	movie := &movix.Movie{
 		EntryID: entry.Id,
 		Entry: *entry,
 	}
+	return movie, entry
 }
 
 func compareMovie(movie *movix.Movie, entry *movix.Entry) bool {
@@ -232,11 +241,12 @@ func compareMovie(movie *movix.Movie, entry *movix.Entry) bool {
 func TestNextMovies(t *testing.T) {
 	t.Run("Get the next movie", func(t *testing.T) {
 		db := test_db(t)
-		movie := test_movie()
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
+		movie, entry := test_movie()
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(movie)
 
 		entry, err := movix.GetNext(db, movie.Entry.Name, movix.Make_series(), movix.Make_movies())
-		
+
 		if err != nil {
 			t.Fail()
 		}
@@ -247,31 +257,34 @@ func TestNextMovies(t *testing.T) {
 	})
 }
 
-func TestNexts(t *testing.T) {
+func TestSuggest(t *testing.T) {
 		db := test_db(t)
-		movie := test_movie()
-		episode, series := test_episode()
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
-		db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
+		episode, series, entry := test_episode()
+
+		movie, entry2 := test_movie()
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(series)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(episode)
+
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry2)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(movie)
 
 		// verify the output
-		GetNexts(db, movix.Make_movies(), movix.Make_series())
+		GetSuggest(db, movix.Make_series(), movix.Make_movies())
 }
 
 func TestSkip(t *testing.T) {
 	t.Run("Skip a single episode using SkipUntil", func(t *testing.T) {
-		episode, series := test_episode()
+		episode, series, entry := test_episode()
 		db := test_db(t)
+		db.Clauses(clause.OnConflict{UpdateAll: true}).Create(entry)
 		db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
 		db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
-		err := movix.SkipUntil(db, series.Name, episode.Season, episode.Part)
-		if err != nil {
-			t.Fail()
-		}
-		entry := get_entry(db, episode.Entry.Path, t)
-		
-		if !entry.Watched {
+		movix.SkipUntil(db, series.Name, episode.Season, episode.Part+1, movix.Make_series())
+
+		new_entry := get_entry(db, episode.Entry.Path, t)
+
+		if !new_entry.Watched {
 			t.Fail()
 		}
 	})
