@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -46,6 +45,7 @@ type Seekable interface {
 
 type Runtime struct {
 	Mediapath string
+	LuaPluginPath string
 	Perm fs.FileMode
 	Dbpath string
 	Treshhold float64
@@ -83,11 +83,6 @@ type Entry struct {
 	Watched_date int64
 }
 
-type Deleteable struct {
-	Path string
-	Rank float64
-}
-
 func (entry *Entry) String() string{
 	return entry.Name
 }
@@ -104,7 +99,7 @@ func matchOne(sufflix string, sufflixes []string) bool {
 func GetNext(db *gorm.DB, search string, producers ...Producer) (*Entry, error) {
 	for _, p := range producers {
 		entry, err := p.Select(db, search)
-		if err != nil && entry != nil {
+		if err == nil && entry != nil {
 			return entry, nil
 		}
 	}
@@ -112,21 +107,27 @@ func GetNext(db *gorm.DB, search string, producers ...Producer) (*Entry, error) 
 }
 
 func RunWalkers(db *gorm.DB, runtime *Runtime, path string, walkers ...FsProducer) error {
-	return filepath.WalkDir(path, func(path string, d fs.DirEntry, fileerr error) error {
+	fmt.Printf("Scanning path: %s\n", path)
+	abspath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	// make it possible to error
+	return filepath.WalkDir(abspath, func(path string, d fs.DirEntry, fileerr error) error {
 		if d.IsDir() {
 			return nil
 		}
 		guessed, err := myguessit(path)
 		if err != nil {
-			return nil
+			return err
 		}
 		for _, walker := range walkers {
 			if walker.FsMatch(guessed) {
 				err := walker.Add(db, runtime, path, guessed)
-				if err != nil {
-					log.Printf("Failed adding matched content: %s", path)
+				if err == nil {
+					Log("Added file %s to database\n", path)
+					return nil
 				}
-				return err
 			}
 		}
 		return nil
@@ -154,20 +155,21 @@ func UpdateWatched(db *gorm.DB, runtime *Runtime, path string, watched_amount fl
 		entry.Offset = 0
 		entry.Watched = true
 		entry.Watched_date = time.Now().Unix()
+		Log("Watched all of %s\n", path)
 	} else {
 		entry.Offset = watched_amount
+		Log("Watched %d of %s\n", watched_amount, path)
 	}
 	db.Save(&entry)
 	return nil
 }
-func SkipUntil(db *gorm.DB, name string, season int64, episode int64, seekable ...Seekable) error {
+func SkipUntil(db *gorm.DB, name string, season int64, episode int64, seekable ...Seekable) {
 	for _, seek := range seekable {
 		err := seek.skipUntil(db, name, season, episode)
-		if err != nil {
-			return err
+		if err == nil {
+			Log("Skipped up to s%de%e of %s\n", season, episode, name)
 		}
 	}
-	return nil
 }
 
 func myguessit(path string) (*FileInfo, error) {

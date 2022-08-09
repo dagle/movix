@@ -1,28 +1,26 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
 
 	"github.com/adrg/xdg"
+	"github.com/dagle/movix"
 	"github.com/spf13/viper"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"github.com/dagle/movix"
 )
 
 var LuaPath string
 
 type Config struct {
 	movix.Runtime
-	LuaPluginPath string
 }
 
 func Conf(configpath, dbpath string) *Config {
@@ -31,7 +29,7 @@ func Conf(configpath, dbpath string) *Config {
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	viper.SetDefault("Treshhold", 0.9)
-	viper.SetDefault("MatchLength", 0.85)
+	viper.SetDefault("MatchLength", 0.35)
 	viper.SetDefault("VerifyLength", true)
 	viper.SetDefault("Moved", true)
 	viper.SetDefault("LuaPluginPath", LuaPath + "/movix.lua")
@@ -40,41 +38,47 @@ func Conf(configpath, dbpath string) *Config {
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Printf("Error reading config file, %s", err)
+		viper.ReadConfig(bytes.NewBuffer([]byte("")))
 	}
 
-	err := viper.Unmarshal(&conf)
+	err := viper.Unmarshal(&conf.Runtime)
 	if err != nil {
-		fmt.Printf("Unable to decode into struct, %v", err)
+		movix.Fatal("Unable to decode into struct: \n", err)
 	}
-	stat, err := os.Stat(conf.Mediapath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if !stat.IsDir() {
-		log.Fatal(err)
-	}
+
 	if dbpath != "" {
 		conf.Dbpath = dbpath
-	} else if conf.Dbpath == "" {
-		conf.Dbpath = conf.Mediapath + "/.movix.db"
+	}
+	if conf.Dbpath == "" {
+		defdbpath, _ := xdg.DataFile("movix.db")
+		conf.Dbpath = defdbpath
 	}
 
 	return &conf
 }
 
 func useage() {
-	fmt.Fprintf(os.Stderr, "usage: movix mode [args]\n")
+	movix.Eprintf("usage: movix mode [args]\n")
     flag.PrintDefaults()
     os.Exit(2)
 }
 
 func watchusage() {
-	fmt.Fprintf(os.Stderr, "usage: movix watched path float\n")
+	movix.Eprintf("usage: movix watched path float\n")
     flag.PrintDefaults()
     os.Exit(2)
 }
 
+func deleteusage() {
+	movix.Eprintf("usage: movix delete [paths]\n")
+    flag.PrintDefaults()
+    os.Exit(2)
+}
+func suggestusage() {
+	movix.Eprintf("usage: movix suggestdel\n")
+    flag.PrintDefaults()
+    os.Exit(2)
+}
 
 func play (conf *Config, entry *movix.Entry) error {
 	err := exec.Command("mpv",
@@ -87,25 +91,24 @@ func play (conf *Config, entry *movix.Entry) error {
 	return nil
 }
 
-func make_config(dirpath string, conf *Config){
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Path to media library: ")
-	text, _ := reader.ReadString('\n')
-	// make a config and write it or just
-	// Mediapath: "/home/dagle/download/media/"?
-	fmt.Print(text)
+func make_defconf(dirpath string){
+	// reader := bufio.NewReader(os.Stdin)
+	// fmt.Print("Path to media library: ")
+	viper.WriteConfig()
+	// text, _ := reader.ReadString('\n')
+	// fmt.Print(text)
 }
 
-var logging bool
+var logpath string
 var sqllog bool
 var dbpath string
 var confpath string
 
-func GetNexts(db *gorm.DB, producers ...movix.Producer) {
+func GetSuggest(db *gorm.DB, producers ...movix.Producer) {
 	for _, producer := range producers {
 		res, err := producer.Next(db)
 		if err != nil {
-			log.Printf("Nexts error: %s", err)
+			movix.Eprintf("Suggest error: %v", err)
 		}
 		for _, str := range res {
 			fmt.Println(str)
@@ -115,30 +118,40 @@ func GetNexts(db *gorm.DB, producers ...movix.Producer) {
 
 func main() {
 	flag.Usage = useage
-	defpath, _ := xdg.ConfigFile("movix/config")
-	flag.BoolVar(&logging, "l", false, "Turn on logging")
+
+	// check these later
+	defpath, _ := xdg.ConfigFile("movix")
+	deflog, _ := xdg.StateFile("movix.log")
+
+	flag.StringVar(&logpath, "l", deflog, "File to use for logging")
 	flag.BoolVar(&sqllog, "q", false, "Turn on sqllogging")
-	flag.StringVar(&dbpath, "d", "", "Specify database directory")
+	flag.StringVar(&dbpath, "d", "","Specify database directory")
 	flag.StringVar(&confpath, "c", defpath, "Specify database directory")
 	flag.Parse()
 
+	err := movix.LogInit(logpath)
+	
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening log: %s\n", err)
+	}
 
 	args := flag.Args()
 	if len(args) < 1 {
 		useage()
 	}
-	
-	conf := Conf(confpath, dbpath)
+
 	var gormcfg gorm.Config
 	if sqllog {
 		gormcfg = gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
 	} else {
 		gormcfg = gorm.Config{}
 	}
+
+	conf := Conf(confpath, dbpath)
 	db, err := gorm.Open(sqlite.Open(conf.Dbpath), &gormcfg)
 
 	if err != nil {
-		panic("Couldn't open movix database")
+		movix.Fatal("Couldn't open movix database")
 	}
 
 	tv := movix.Make_series()
@@ -146,12 +159,14 @@ func main() {
 
 	switch args[0] {
 	case "init":
-		make_config(confpath, conf)
+		db.AutoMigrate(&movix.Episode{})
+		db.AutoMigrate(&movix.Series{})
+		db.AutoMigrate(&movix.Movie{})
+		// movix.Log("Database created\n")
 	case "add":
 		var producers []movix.URIProducer
-
 		if len(args) != 2 {
-			panic("Add needs a filepath")
+			movix.Fatal("Add needs a filepath")
 		}
 		for _, prod := range producers {
 			if prod.Match(args[1]) {
@@ -164,9 +179,28 @@ func main() {
 		db.AutoMigrate(&movix.Episode{})
 		db.AutoMigrate(&movix.Series{})
 		db.AutoMigrate(&movix.Movie{})
-		fmt.Printf("Migrated media path: %s\n", conf.Mediapath)
-	case "rescan":
-		movix.Rescan(db, &conf.Runtime, movies, tv)
+	// case "rescan":
+	// 	movix.Rescan(db, &conf.Runtime, movies, tv)
+	case "suggestdel":
+		if len(args) < 2 {
+			suggestusage()
+		}
+		suggest, err := movix.Suggest_deletions(db)
+		if err != nil {
+			fmt.Println(err)
+			suggestusage()
+		}
+		fmt.Println(suggest)
+	case "delete_group":
+		if len(args) < 2 {
+			deleteusage()
+		}
+		movix.Delete_group(db, args[1:])
+	case "delete":
+		if len(args) < 2 {
+			deleteusage()
+		}
+		movix.Delete(db, args[1:])
 	case "watched":
 		if len(args) < 3 {
 			watchusage()
@@ -176,33 +210,35 @@ func main() {
 		} else {
 			s, err := strconv.ParseFloat(args[2], 32); 
 			if err != nil {
-				fmt.Println(err)
-				watchusage()
+				movix.Fatal("Watched needs a value or full: %v", err)
 			}
 			movix.UpdateWatched(db, &conf.Runtime, args[1], s, false)
 		}
 	case "next":
-
 		search := ""
 		if len(args) != 2 || args[1] == "" {
-			log.Fatal("movix next needs a title argument")
+			movix.Fatal("movix next needs a title argument")
 		} 
 		search  = args[1]
 		entry, err := movix.GetNext(db, search, movies, tv)
 		if err == nil {
 			play(conf, entry)
 		}
-	case "nexts":
-		GetNexts(db, tv, movies)
+	case "suggest":
+		GetSuggest(db, tv, movies)
 	case "skip":
 		if len(args) != 4 {
-			log.Fatal("Skip needs 3 arguments: show season episode")
+			movix.Fatal("Skip needs 3 arguments: show season episode")
 		}
 		season, err := strconv.Atoi(args[2])
 		episode, err2 := strconv.Atoi(args[3])
 		if err != nil || err2 != nil {
-			log.Fatal("Arguments 3 and 4 needs to be integers")
+			movix.Fatal("Arguments 3 and 4 needs to be integers")
 		}
 		movix.SkipUntil(db, args[1], int64(season), int64(episode), tv)
+	case "version":
+		fmt.Printf("Movix version: %s\n", "0.0.1")
+	default:
+		useage()
 	}
 }

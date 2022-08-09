@@ -1,4 +1,4 @@
 #!/bin/sh
 
-MF=$(movix nexts | rofi -dmenu -i -p "movix-nexts")
+MF=$(movix suggest | rofi -dmenu -i -p "movix-suggest")
 movix next "$MF"

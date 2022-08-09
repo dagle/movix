@@ -1,5 +1,5 @@
 #!/bin/sh
 
-MF=$(movix nexts | fzf)
+MF=$(movix suggest | fzf)
 movix next "$MF"
 

@@ -3,7 +3,6 @@ package movix
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -28,6 +27,7 @@ type Series struct {
 	Id int
 	Name string
 	Last_updated int64
+	Last_watched int64
 	Prio int // maybe in the future, 
 	Subscribed bool
 }
@@ -249,7 +249,7 @@ func (episode *Episode) Move(runtime *Runtime, codec string) error {
 	dir := runtime.Mediapath + "/tv/" + episode.Series.Name + "/" + ep
 	os.MkdirAll(dir, runtime.Perm)
 	new_path := dir + filename
-	log.Printf("Moving file %s to %s\n", episode.Entry.Path, new_path)
+	Log("Moving file %s to %s\n", episode.Entry.Path, new_path)
 	err := os.Rename(episode.Entry.Path, new_path)
 	if err != nil {
 		return err
