@@ -4,13 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"math"
+	"os"
+	"time"
+
 	// "os"
 	"os/exec"
 	"path/filepath"
+
 	// "time"
 
 	"database/sql"
+
 	"github.com/tidwall/gjson"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
@@ -71,7 +77,6 @@ type FileInfo struct {
 
 type Entry struct {
 	Id int64
-	// gorm.Model
 	// RemoteId: int64,
 	Length       float64
 	Path         string
@@ -83,18 +88,19 @@ type Entry struct {
 	Watched_date int64
 }
 
-func Initb(db *sql.DB) error {
+// TODO: Make path primary key
+func Init(db *sql.DB) error {
 	sqlStmt :=
 		`create table entry (
-      id int not null primary key,
-      length int,
-      path text,
-      name text,
-      added int,
-      offset real,
-      deleted int,
-      watched int,
-      watched_date int)
+		  id int not null primary key,
+		  length int,
+		  path text,
+		  name text,
+		  added int,
+		  offset real,
+		  deleted int,
+		  watched int,
+		  watched_date int)
     `
 	_, err := db.Exec(sqlStmt)
 	return err
@@ -102,6 +108,22 @@ func Initb(db *sql.DB) error {
 
 func (entry *Entry) String() string {
 	return entry.Name
+}
+
+func (entry *Entry) Save(db *sql.DB) error {
+	movie_stmt, err := db.Prepare(`insert or replace into series(
+		id, length, path, name, added, offset, deleted, watched, watched_date)
+		values(?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer movie_stmt.Close()
+
+	movie_stmt.Exec(entry.Id, entry.Length, entry.Path, entry.Name, entry.Added, entry.Offset,
+		entry.Deleted, entry.Watched, entry.Watched_date)
+
+	return nil
 }
 
 func matchOne(sufflix string, sufflixes []string) bool {
@@ -140,14 +162,15 @@ func RunWalkers(db *sql.DB, runtime *Runtime, path string, walkers ...FsProducer
 		}
 		for _, walker := range walkers {
 			if walker.FsMatch(guessed) {
-				err := walker.Add(db, runtime, path, guessed)
+				err = walker.Add(db, runtime, path, guessed)
 				if err == nil {
 					Log("Added file %s to database\n", path)
 					return nil
 				}
 			}
 		}
-		return nil
+		// we return the last error if we couldn't add the file
+		return err
 	})
 }
 
@@ -161,25 +184,54 @@ func Rescan(db *sql.DB, runtime *Runtime, walkers ...FsProducer) error {
 	})
 }
 
+func GetEntry(db *sql.DB, path string) (*Entry, error){
+	stmt, err := db.Prepare(`select entry.id, 
+		entry.length,
+		entry.path,
+		entry.name,
+		entry.added,
+		entry.offset,
+		entry.deleted,
+		entry.watched,
+		entry.watched_date
+	from entry 
+		where path = ?")
+	`)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer stmt.Close()
+	var entry Entry
+	err = stmt.QueryRow(path).Scan(&entry.Id, &entry.Length, &entry.Path, &entry.Name,
+		&entry.Added, &entry.Offset, &entry.Deleted, &entry.Watched, &entry.Watched_date)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, nil
+}
+
 func UpdateWatched(db *sql.DB, runtime *Runtime, path string, watched_amount float64, full bool) error {
-	// var entry Entry
-	// err := db.First(&entry, "path = ?", path).Error
-	// if err != nil {
-	// 	return err
-	// }
-	// // if we watch more than trashhold
-	// if full || ((watched_amount / entry.Length) > runtime.Treshhold) {
-	// 	entry.Offset = 0
-	// 	entry.Watched = true
-	// 	entry.Watched_date = time.Now().Unix()
-	// 	Log("Watched all of %s\n", path)
-	// } else {
-	// 	entry.Offset = watched_amount
-	// 	Log("Watched %d of %s\n", watched_amount, path)
-	// }
-	// db.Save(&entry)
+	entry, err := GetEntry(db, path)
+
+	if err != nil {
+		return err
+	}
+	if full || ((watched_amount / entry.Length) > runtime.Treshhold) {
+		entry.Offset = 0
+		entry.Watched = true
+		entry.Watched_date = time.Now().Unix()
+		Log("Watched all of %s\n", path)
+	} else {
+		entry.Offset = watched_amount
+		Log("Watched %d of %s\n", watched_amount, path)
+	}
+	entry.Save(db)
 	return nil
 }
+
 func SkipUntil(db *sql.DB, name string, season int64, episode int64, seekable ...Seekable) {
 	for _, seek := range seekable {
 		err := seek.skipUntil(db, name, season, episode)
@@ -278,20 +330,63 @@ func Delete_group(db *sql.DB, names []string) error {
 	return nil
 }
 
-func Delete(db *sql.DB, paths []string) error {
-	// for _, path := range paths {
-	// 	var entry Entry
-	// 	err := db.Where("path = ?", path).First(&entry).Error
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if err := os.Remove(path); err != nil {
-	// 		return err
-	// 	}
-	// 	entry.Deleted = true
-	// 	db.Save(&entry)
-	// }
-	return nil
+func fsmatch(info *FileInfo) bool {
+	filetypes := []string{"mkv", "avi", "mp4", "mov", "wmv", "peg"}
+	if !matchOne(info.Container, filetypes) {
+		return false
+	}
+	if info.Mimetype[:5] == "video" && info.Type == "movie" {
+		return true
+	}
+	return false
+}
+
+func DeleteWalker(db *sql.DB, root string) error {
+	abspath, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(abspath, func(path string, d fs.DirEntry, fileerr error) error {
+		if d.IsDir() {
+			return nil
+		}
+		guessed, err := myguessit(path)
+		if err != nil {
+			return err
+		}
+		if !fsmatch(guessed) {
+			return nil
+		}
+		entry, err := GetEntry(db, path)
+		if err != nil {
+			log.Println("Couldn't delete file ", path, "with error: ", err)
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			log.Println("Couldn't delete file ", path, "with error: ", err)
+			return err
+		}
+		entry.Deleted = true
+		entry.Save(db)
+		return nil
+	})
+}
+
+func Delete(db *sql.DB, paths []string) {
+	for _, path := range paths {
+		entry, err := GetEntry(db, path)
+		if err != nil {
+			log.Println("Couldn't delete file ", path, "with error: ", err)
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			log.Println("Couldn't delete file ", path, "with error: ", err)
+			continue
+		}
+		entry.Deleted = true
+		entry.Save(db)
+	}
 }
 
 func almostEqual(a, b, threshold float64) bool {

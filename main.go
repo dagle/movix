@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"log"
 
 	"os"
 	"os/exec"
@@ -27,7 +28,7 @@ func Conf(configpath, dbpath string) *Config {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(configpath)
 	viper.AutomaticEnv()
-	viper.SetConfigType("yml")
+	viper.SetConfigType("toml")
 	viper.SetDefault("Treshhold", 0.9)
 	viper.SetDefault("MatchLength", 0.35)
 	viper.SetDefault("VerifyLength", true)
@@ -35,23 +36,32 @@ func Conf(configpath, dbpath string) *Config {
 	viper.SetDefault("LuaPluginPath", LuaPath+"/movix.lua")
 	viper.SetDefault("Perm", 664)
 	viper.SetDefault("Mediapath", xdg.UserDirs.Videos+"/movix")
+
+	err := os.MkdirAll(configpath, 0750)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defdbpath, err := xdg.DataFile("movix.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	viper.SetDefault("Dbpath", defdbpath);
+
+	viper.SafeWriteConfig()
 	var conf Config
 
 	if err := viper.ReadInConfig(); err != nil {
 		viper.ReadConfig(bytes.NewBuffer([]byte("")))
 	}
 
-	err := viper.Unmarshal(&conf.Runtime)
+	err = viper.Unmarshal(&conf.Runtime)
 	if err != nil {
 		backend.Fatal("Unable to decode into struct: \n", err)
 	}
 
 	if dbpath != "" {
 		conf.Dbpath = dbpath
-	}
-	if conf.Dbpath == "" {
-		defdbpath, _ := xdg.DataFile("movix.db")
-		conf.Dbpath = defdbpath
 	}
 
 	return &conf
@@ -81,6 +91,8 @@ func suggestusage() {
 }
 
 func play(conf *Config, entry *backend.Entry) error {
+	// TODO: Move this to this to the config file, with some extremely
+	// small formating language
 	err := exec.Command("mpv",
 		"--script="+conf.LuaPluginPath,
 		"--start="+fmt.Sprintf("%f", entry.Offset),
@@ -89,14 +101,6 @@ func play(conf *Config, entry *backend.Entry) error {
 		return err
 	}
 	return nil
-}
-
-func make_defconf(dirpath string) {
-	// reader := bufio.NewReader(os.Stdin)
-	// fmt.Print("Path to media library: ")
-	viper.WriteConfig()
-	// text, _ := reader.ReadString('\n')
-	// fmt.Print(text)
 }
 
 var logpath string
@@ -119,9 +123,8 @@ func GetSuggest(db *sql.DB, producers ...backend.Producer) {
 func main() {
 	flag.Usage = useage
 
-	// check these later
-	defpath, _ := xdg.ConfigFile("backend")
-	deflog, _ := xdg.StateFile("backend.log")
+	defpath, _ := xdg.ConfigFile("movix")
+	deflog, _ := xdg.StateFile("movix.log")
 
 	flag.StringVar(&logpath, "l", deflog, "File to use for logging")
 	flag.BoolVar(&sqllog, "q", false, "Turn on sqllogging")
@@ -140,16 +143,8 @@ func main() {
 		useage()
 	}
 
-	// var gormcfg gorm.Config
-	// if sqllog {
-	// 	gormcfg = gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
-	// } else {
-	// 	gormcfg = gorm.Config{}
-	// }
-
 	conf := Conf(confpath, dbpath)
-	db, err := sql.Open("sqlite3", "./foo.db")
-	// db, err := gorm.Open(sqlite.Open(conf.Dbpath), &gormcfg)
+	db, err := sql.Open("sqlite3", conf.Dbpath);
 
 	if err != nil {
 		backend.Fatal("Couldn't open backend database")
@@ -160,10 +155,18 @@ func main() {
 
 	switch args[0] {
 	case "init":
-		// db.AutoMigrate(&backend.Episode{})
-		// db.AutoMigrate(&backend.Series{})
-		// db.AutoMigrate(&backend.Movie{})
-		// backend.Log("Database created\n")
+		err := backend.Init(db);
+		if err != nil {
+			log.Fatal(err);
+		}
+		err = tv.InitDB(db);
+		if err != nil {
+			log.Fatal(err);
+		}
+		err = movies.InitDb(db);
+		if err != nil {
+			log.Fatal(err);
+		}
 	case "add":
 		var producers []backend.URIProducer
 		if len(args) != 2 {
@@ -182,21 +185,21 @@ func main() {
 		// db.AutoMigrate(&backend.Movie{})
 	// case "rescan":
 	// 	backend.Rescan(db, &conf.Runtime, movies, tv)
-	case "suggestdel":
-		if len(args) < 2 {
-			suggestusage()
-		}
-		suggest, err := backend.Suggest_deletions(db)
-		if err != nil {
-			fmt.Println(err)
-			suggestusage()
-		}
-		fmt.Println(suggest)
-	case "delete_group":
-		if len(args) < 2 {
-			deleteusage()
-		}
-		backend.Delete_group(db, args[1:])
+	// case "suggestdel":
+	// 	if len(args) < 2 {
+	// 		suggestusage()
+	// 	}
+	// 	suggest, err := backend.Suggest_deletions(db)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		suggestusage()
+	// 	}
+	// 	fmt.Println(suggest)
+	// case "delete_group":
+	// 	if len(args) < 2 {
+	// 		deleteusage()
+	// 	}
+	// 	backend.Delete_group(db, args[1:])
 	case "delete":
 		if len(args) < 2 {
 			deleteusage()

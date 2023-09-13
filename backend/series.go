@@ -1,10 +1,7 @@
 package movix
 
 import (
-	"errors"
 	"fmt"
-	// "os"
-	// "strconv"
 	"strings"
 	"time"
 
@@ -13,7 +10,7 @@ import (
 )
 
 type Episode struct {
-	// gorm.Model
+	Id       int64
 	Part     int64
 	Season   int64
 	SeriesId int // the id to the tmdb, maybe not needed
@@ -27,21 +24,35 @@ type Series struct {
 	Name         string
 	Last_updated int64
 	Last_watched int64
-	Prio         int // maybe in the future,
-	Subscribed   bool
 }
 
 func (t *Tv) InitDB(db *sql.DB) error {
-	sqlStmt :=
+	sqlSeriesStmt :=
+		`create table series (
+      id integer not null primary key,
+      name text not null,
+      last_updated int,
+      last_watched int
+      )`
+
+	_, err := db.Exec(sqlSeriesStmt)
+
+	if err != nil {
+		return err
+	}
+
+	sqlEpisodeStmt :=
 		`create table episode (
       id integer not null primary key,
-      part int,
-      season int,
-      seriesid int,
-      entryid,
-      FOREIGN KEY (entryid) REFERENCES entry(id))
-    `
-	_, err := db.Exec(sqlStmt)
+      entryid int not null,
+      part int not null,
+      season int not null,
+      seriesid int not null,
+      FOREIGN KEY (entryid) REFERENCES entry(id),
+      FOREIGN KEY (seriesid) REFERENCES series(id)
+  )`
+	_, err = db.Exec(sqlEpisodeStmt)
+
 	return err
 }
 
@@ -76,7 +87,7 @@ func get_series(title string) (*Series, error) {
 	series := &Series{
 		Id:           int(id),
 		Name:         show_details.Name,
-		Subscribed:   true,
+		// Subscribed:   true,
 		Last_updated: time.Now().Unix(),
 	}
 	return series, nil
@@ -111,13 +122,15 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 		return nil, err
 	}
 
-	length := 0.0
-	if verify_length {
-		length = get_filelength(path)
-		if !episodeAlmostEqual(length/60, show_details.EpisodeRunTime, treshhold) {
-			return nil, errors.New("file length doesn't match tmdb file length")
-		}
-	}
+	length := get_filelength(path)
+	
+	// TODO: Fix this, this episodes should have a length now
+	// if verify_length {
+	// 	if !episodeAlmostEqual(length/60, show_details.EpisodeRunTime, treshhold) {
+	// 		return nil, errors.New("file length doesn't match tmdb file length")
+	// 	}
+	// }
+
 	now := time.Now().Unix()
 	return &Episode{
 		Entry: Entry{
@@ -156,117 +169,130 @@ func (tv *Tv) FsMatch(info *FileInfo) bool {
 }
 
 func (tv *Tv) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) error {
-	// series, err := get_series(info.Title)
-	// if err != nil {
-	// 	return err
-	// }
-	// episode, err := series.get_episode(path, info.Season, info.Episode, runtime.MatchLength, runtime.VerifyLength)
-	// if err != nil {
-	// 	return err
-	// }
-	// 	if conf.Move {
-	// 		episode.Move(conf, guessed.Codec)
-	// 	}
-	// db.Clauses(clause.OnConflict{DoNothing: true}).Create(series)
-	// db.Clauses(clause.OnConflict{DoNothing: true}).Create(episode)
+	series, err := get_series(info.Title)
+	if err != nil {
+		return err
+	}
+	episode, err := series.get_episode(path, info.Season, info.Episode, runtime.MatchLength, runtime.VerifyLength)
+	if err != nil {
+		return err
+	}
+	series_stmt, err := db.Prepare("insert into series(id, name, last_updated) values(?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer series_stmt.Close()
+	// TODO: Is inserting into an id twice an error?
+	// res, err := series_stmt.Exec(series.Id, series.Name, series.Last_updated);
+	series_stmt.Exec(series.Id, series.Name, series.Last_updated)
+
+	episode_stmt, err := db.Prepare("insert into episode(id, part, season, seriesid, entryid) values(?, ?, ?, ?, ?)")
+	if err != nil {
+		return err;
+	}
+	defer episode_stmt.Close()
+
+	// TODO: Is inserting into an id twice an error?
+	episode_stmt.Exec(episode.Id, episode.Part, episode.Season, episode.SeriesId, episode.EntryID)
+
 	return nil
 }
 
 func (tv *Tv) Next(db *sql.DB) ([]string, error) {
-	var episodes []Episode
-	// err := db.Joins("Series").Joins("Entry").
-	// 	Where("watched = ? and deleted = ?", false, false).
-	// 	Order("last_watched, season, part").
-	// 	// Distinct("Series.id").
-	// 	Group("Series.id").
-	// 	Find(&episodes).
-	// 	Error
-	//
-	// if err != nil {
-	// 	return nil, err
-	// }
-	//
-	var names []string
-	for _, e := range episodes {
-		names = append(names, e.Series.Name)
+	rows, err := db.Query(`select series.name from series 
+		join episode
+			ON episode.seriesid = series.id	
+		join entry
+			ON episode.entryid = entry.id
+		where entry.watched = 0 and entry.deleted = 0")
+	`)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	
+	var names []string
+	for rows.Next() {
+		var name string
+		err = rows.Scan(&name)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+
 	return names, nil
 }
 
 func (tv *Tv) Select(db *sql.DB, name string) (*Entry, error) {
-	var episode Episode
-	// err := db.Joins("Series").Joins("Entry").
-	// 	Where("watched = ? and deleted = ? and Series.name = ?", false, false, name).
-	// 	Order("last_watched, season, part").
-	// 	Group("Series.id").
-	// 	First(&episode).
-	// 	Error
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// var series Series
-	// e := db.Where("name = ?", name).First(&series).Error
-	// if e != nil {
-	// 	return nil, e
-	// }
-	//
-	// series.Last_updated = time.Now().Unix()
-	// db.Save(&series)
+	stmt, err := db.Prepare(`select entry.id, 
+		entry.length,
+		entry.path,
+		entry.name,
+		entry.added,
+		entry.offset,
+		entry.deleted,
+		entry.watched,
+		entry.watched_date
+	from series 
+		join episode
+			ON episode.seriesid = series.id	
+		join entry
+			ON episode.entryid = entry.id
+		where entry.watched = 0 and entry.deleted = 0  and series.name = ?")
+	`)
 
-	return &episode.Entry, nil
+	if err != nil {
+		return nil, err
+	}
+
+	defer stmt.Close()
+	var entry Entry
+	err = stmt.QueryRow(name).Scan(&entry.Id, &entry.Length, &entry.Path, &entry.Name,
+		&entry.Added, &entry.Offset, &entry.Deleted, &entry.Watched, &entry.Watched_date)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, nil
 }
 
-// this should return an interator?
 func (tv *Tv) skipUntil(db *sql.DB, name string, season, episode int64) error {
-	// var episodes []Episode
-	// err := db.Joins("Series").Joins("Entry").
-	// 	Where("Series.name = ? and season < ? or (season = ? and part < ?)", name, season, season, episode).
-	// 	Find(&episodes).
-	// 	Error
-	//
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, e := range episodes {
-	// 	e.Entry.Watched = true
-	// 	db.Save(&e.Entry)
-	// }
-	return nil
+	stmt, err := db.Prepare(`update entry set
+		entry.watched = true
+	from entry 
+		join episode
+			ON entry.id = episode.entryid
+		join series
+			ON episode.seriesid = series.id
+		where series.name = ? and (series.season < ? or (series.season = ? and series.part < ?))")
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(name, season, season, episode)
+
+	return err
 }
 
 func (tv *Tv) unmarkAfter(db *sql.DB, name string, season, episode int64) error {
-	// var episodes []Episode
-	// err := db.Joins("Series").Joins("Entry").
-	// 	Where("Series.name = ? and season > ? or (season = ? and part > ?)", name, season, season, episode).
-	// 	Find(&episodes).
-	// 	Error
-	//
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, e := range episodes {
-	// 	e.Entry.Watched = false
-	// 	db.Save(&e.Entry)
-	// }
-	return nil
+	stmt, err := db.Prepare(`update entry set
+		entry.watched = true
+	from entry 
+		join episode
+			ON entry.id = episode.entryid
+		join series
+			ON episode.seriesid = series.id
+		where series.name = ? and (series.season > ? or (series.season = ? and series.part > ?))")
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(name, season, season, episode)
+
+	return err
 }
-
-// func (episode *Episode) make_fsname(codec string) string {
-// 	return fmt.Sprintf("%s S%dE%d %s.%s", episode.Series.Name,
-// 		episode.Season, episode.Part, episode.Entry.Name, codec)
-// }
-
-// func (episode *Episode) Move(runtime *Runtime, codec string) error {
-// 	filename := episode.make_fsname(codec)
-// 	ep := strconv.FormatInt(episode.Season, 10)
-// 	dir := runtime.Mediapath + "/tv/" + episode.Series.Name + "/" + ep
-// 	os.MkdirAll(dir, runtime.Perm)
-// 	new_path := dir + filename
-// 	Log("Moving file %s to %s\n", episode.Entry.Path, new_path)
-// 	err := os.Rename(episode.Entry.Path, new_path)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	episode.Entry.Path = new_path
-// 	return nil
-// }

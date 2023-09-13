@@ -13,6 +13,7 @@ import (
 
 type Movie struct {
 	// gorm.Model
+	Id      int64
 	EntryID int64
 	Entry   Entry
 }
@@ -21,8 +22,9 @@ type Movies struct{}
 
 func (m *Movies) InitDb(db *sql.DB) error {
 	sqlStmt :=
-		`create table entry (
+	`create table movie (
       id int not null primary key,
+      entryid int not null,
       FOREIGN KEY (entryid) REFERENCES entry(id))
     `
 	_, err := db.Exec(sqlStmt)
@@ -72,15 +74,18 @@ func get_movie(path, title string, runtime *Runtime) (*Movie, error) {
 
 // TODO: Add a overwrite flag
 func (m *Movies) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) error {
-	// movie, err := get_movie(path, info.Title, runtime)
-	// if err != nil {
-	// 	return err
-	// }
-	// if conf.Move {
-	// 	movie.Move(conf, guessed.Codec)
-	// }
+	movie, err := get_movie(path, info.Title, runtime)
+	if err != nil {
+		return err
+	}
 
-	// db.Clauses(clause.OnConflict{DoNothing: true}).Create(movie)
+	movie_stmt, err := db.Prepare("insert into series(id, entryid) values(?, ?)");
+	if err != nil {
+		return err
+	}
+	defer movie_stmt.Close()
+
+	movie_stmt.Exec(movie.Id, movie.EntryID)
 	return nil
 }
 func Make_movies() *Movies {
@@ -99,48 +104,57 @@ func (m *Movies) FsMatch(info *FileInfo) bool {
 }
 
 func (m *Movies) Next(db *sql.DB) ([]string, error) {
-	var movies []Movie
-	// err := db.Joins("Entry").
-	// 	Where("watched = ? and deleted = ?", false, false).
-	// 	Find(&movies).
-	// 	Error
-	// if err != nil {
-	// 	return nil, err
-	// }
+	rows, err := db.Query(`select entry.name from movie 
+		join entry
+			ON movie.entryid = entry.id
+		where entry.watched = 0 and entry.deleted = 0")
+	`)
 
-	var names []string
-	for _, e := range movies {
-		names = append(names, e.Entry.Name)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	
+	var names []string
+	for rows.Next() {
+		var name string
+		err = rows.Scan(&name)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+
 	return names, nil
 }
 
 func (m *Movies) Select(db *sql.DB, name string) (*Entry, error) {
+	stmt, err := db.Prepare(`select entry.id, 
+		entry.length,
+		entry.path,
+		entry.name,
+		entry.added,
+		entry.offset,
+		entry.deleted,
+		entry.watched,
+		entry.watched_date
+	from movie 
+		join entry
+			ON movie.entryid = entry.id
+		where entry.watched = 0 and entry.deleted = 0 and entry.name = ?")
+	`)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer stmt.Close()
 	var entry Entry
-	// err := db.Where("watched = ? and deleted = ? and name = ?", false, false, name).
-	// 	First(&entry).
-	// 	Error
-	// if err != nil {
-	// 	return nil, err
-	// }
+	err = stmt.QueryRow(name).Scan(&entry.Id, &entry.Length, &entry.Path, &entry.Name,
+		&entry.Added, &entry.Offset, &entry.Deleted, &entry.Watched, &entry.Watched_date)
+	if err != nil {
+		return nil, err
+	}
+
 	return &entry, nil
 }
-
-// maybe escape filenames etc
-// func (m *Movie) make_fsname(codec string) string {
-// 	return fmt.Sprintf("%s.%s", m.Entry.Name, codec)
-// }
-
-// func (m *Movie) Move(runtime *Runtime, codec string) error {
-// 	filename := m.make_fsname(codec)
-// 	dir := runtime.Mediapath + "/movies/"
-// 	os.MkdirAll(dir, runtime.Perm)
-// 	new_path := dir + filename
-// 	log.Printf("Moving file %s to %s\n", m.Entry.Path, new_path)
-// 	err := os.Rename(m.Entry.Path, new_path)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	m.Entry.Path = new_path
-// 	return nil
-// }
