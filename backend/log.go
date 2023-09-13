@@ -7,7 +7,7 @@ import (
 )
 
 func LogInit(path string) error {
-	logfile, err :=  os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	logfile, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		return err
 	}
@@ -18,7 +18,7 @@ func LogInit(path string) error {
 
 func Eprintf(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, format, a...)
-} 
+}
 
 func Fatal(v ...any) {
 	fmt.Fprintf(os.Stderr, "%v\n", v...)

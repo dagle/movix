@@ -4,10 +4,10 @@ PREFIX := /usr/local
 BINDIR := $(PREFIX)/bin
 MANDIR := $(PREFIX)/share/man
 SCRIPT := $(PREFIX)/share/movix
-SRC = cmd/movix/main.go
+SRC = main.go
 
 movix:
-	go build -ldflags "-X main.LuaPath=${SCRIPT}" -o $@ ./cmd/$@
+	go build -ldflags "-X main.LuaPath=${SCRIPT}" -o $@
 
 man:
 	scdoc < movix.1.scd > movix.1
