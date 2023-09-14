@@ -85,8 +85,8 @@ func get_series(title string) (*Series, error) {
 		return nil, err
 	}
 	series := &Series{
-		Id:           int(id),
-		Name:         show_details.Name,
+		Id:   int(id),
+		Name: show_details.Name,
 		// Subscribed:   true,
 		Last_updated: time.Now().Unix(),
 	}
@@ -123,7 +123,7 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 	}
 
 	length := get_filelength(path)
-	
+
 	// TODO: Fix this, this episodes should have a length now
 	// if verify_length {
 	// 	if !episodeAlmostEqual(length/60, show_details.EpisodeRunTime, treshhold) {
@@ -186,9 +186,11 @@ func (tv *Tv) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) err
 	// res, err := series_stmt.Exec(series.Id, series.Name, series.Last_updated);
 	series_stmt.Exec(series.Id, series.Name, series.Last_updated)
 
+	episode.Entry.Save(db)
+
 	episode_stmt, err := db.Prepare("insert into episode(id, part, season, seriesid, entryid) values(?, ?, ?, ?, ?)")
 	if err != nil {
-		return err;
+		return err
 	}
 	defer episode_stmt.Close()
 
@@ -210,7 +212,7 @@ func (tv *Tv) Next(db *sql.DB) ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var names []string
 	for rows.Next() {
 		var name string

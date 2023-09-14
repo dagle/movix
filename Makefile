@@ -7,8 +7,8 @@ SCRIPT := $(PREFIX)/share/movix
 SRC = main.go
 
 movix:
-	go build -ldflags "-X main.LuaPath=${SCRIPT}" -o $@
-
+	go install -ldflags "-X main.LuaPath=${SCRIPT}"
+	
 man:
 	scdoc < movix.1.scd > movix.1
 

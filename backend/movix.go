@@ -160,6 +160,7 @@ func RunWalkers(db *sql.DB, runtime *Runtime, path string, walkers ...FsProducer
 		if err != nil {
 			return err
 		}
+		fmt.Println(guessed)
 		for _, walker := range walkers {
 			if walker.FsMatch(guessed) {
 				err = walker.Add(db, runtime, path, guessed)
@@ -184,7 +185,7 @@ func Rescan(db *sql.DB, runtime *Runtime, walkers ...FsProducer) error {
 	})
 }
 
-func GetEntry(db *sql.DB, path string) (*Entry, error){
+func GetEntry(db *sql.DB, path string) (*Entry, error) {
 	stmt, err := db.Prepare(`select entry.id, 
 		entry.length,
 		entry.path,

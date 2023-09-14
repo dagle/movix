@@ -11,9 +11,9 @@ import (
 	"strconv"
 
 	"database/sql"
-  _ "github.com/mattn/go-sqlite3"
 	"github.com/adrg/xdg"
 	backend "github.com/dagle/movix/backend"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/spf13/viper"
 )
@@ -46,7 +46,7 @@ func Conf(configpath, dbpath string) *Config {
 	if err != nil {
 		log.Fatal(err)
 	}
-	viper.SetDefault("Dbpath", defdbpath);
+	viper.SetDefault("Dbpath", defdbpath)
 
 	viper.SafeWriteConfig()
 	var conf Config
@@ -144,7 +144,7 @@ func main() {
 	}
 
 	conf := Conf(confpath, dbpath)
-	db, err := sql.Open("sqlite3", conf.Dbpath);
+	db, err := sql.Open("sqlite3", conf.Dbpath)
 
 	if err != nil {
 		backend.Fatal("Couldn't open backend database")
@@ -155,30 +155,33 @@ func main() {
 
 	switch args[0] {
 	case "init":
-		err := backend.Init(db);
+		err := backend.Init(db)
 		if err != nil {
-			log.Fatal(err);
+			log.Fatal(err)
 		}
-		err = tv.InitDB(db);
+		err = tv.InitDB(db)
 		if err != nil {
-			log.Fatal(err);
+			log.Fatal(err)
 		}
-		err = movies.InitDb(db);
+		err = movies.InitDb(db)
 		if err != nil {
-			log.Fatal(err);
+			log.Fatal(err)
 		}
 	case "add":
-		var producers []backend.URIProducer
+		// var producers []backend.URIProducer
 		if len(args) != 2 {
 			backend.Fatal("Add needs a filepath")
 		}
-		for _, prod := range producers {
-			if prod.Match(args[1]) {
-				prod.Add(db, &conf.Runtime, args[1], nil)
-				return
-			}
+		// for _, prod := range producers {
+		// 	if prod.Match(args[1]) {
+		// 		prod.Add(db, &conf.Runtime, args[1], nil)
+		// 		return
+		// 	}
+		// }
+		err := backend.RunWalkers(db, &conf.Runtime, args[1], movies, tv)
+		if err != nil {
+			log.Fatal(err)
 		}
-		// backend.RunWalkers(db, &conf.Runtime, args[1], movies, tv)
 	case "migrate":
 		// db.AutoMigrate(&backend.Episode{})
 		// db.AutoMigrate(&backend.Series{})
