@@ -15,7 +15,7 @@ type Episode struct {
 	Season   int64
 	SeriesId int // the id to the tmdb, maybe not needed
 	Series   Series
-	EntryID  int64
+	EntryID  string
 	Entry    Entry
 }
 
@@ -102,9 +102,13 @@ func episodeAlmostEqual(a float64, bs []int, threshold float64) bool {
 	return false
 }
 
-func make_name(show string, season int, episode int, name string) string {
+func make_episode_name(show string, season int, episode int, name string) string {
 	return fmt.Sprintf("%s S%dE%d %s", show,
 		season, episode, name)
+}
+
+func make_episode_id(episode *tmdb.TVEpisodeDetails) string {
+	return fmt.Sprintf("episode: %d", episode.ID)
 }
 
 func (series *Series) get_episode(path string, season, episodenum int64, treshhold float64, verify_length bool) (*Episode, error) {
@@ -131,14 +135,14 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 	// 	}
 	// }
 
+	eid := make_episode_id(episode_details)
 	now := time.Now().Unix()
 	return &Episode{
 		Entry: Entry{
-			Id: episode_details.ID, // we shouldn't really do this
-			// RemoteId: episode_details.ID,
+			Id:           eid,
 			Path:         path,
 			Length:       length,
-			Name:         make_name(show_details.Name, int(season), int(episodenum), episode_details.Name),
+			Name:         make_episode_name(show_details.Name, int(season), int(episodenum), episode_details.Name),
 			Added:        now,
 			Deleted:      false,
 			Offset:       0,
@@ -150,6 +154,7 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 		Season:   season,
 		SeriesId: series.Id,
 		Series:   *series,
+		EntryID: eid,
 	}, nil
 }
 
@@ -169,22 +174,56 @@ func (tv *Tv) FsMatch(info *FileInfo) bool {
 }
 
 func (tv *Tv) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) error {
+	entry, err := GetEntryPath(db, path)
+
+	// if we have the file in the db,
+	if err == nil && entry != nil {
+		if entry.Deleted {
+			entry.Deleted = false
+			entry.Added = time.Now().Unix()
+			_, err = entry.Save(db)
+			return err
+		} else {
+			return nil
+		}
+	}
+
 	series, err := get_series(info.Title)
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 	episode, err := series.get_episode(path, info.Season, info.Episode, runtime.MatchLength, runtime.VerifyLength)
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
-	series_stmt, err := db.Prepare("insert into series(id, name, last_updated) values(?, ?, ?)")
+	
+	entry, err = GetEntry(db, episode.EntryID)
+	if err == nil && entry != nil {
+		if entry.Deleted {
+			entry.Deleted = false
+			entry.Added = time.Now().Unix()
+			entry.Path = episode.Entry.Path
+			_, err = entry.Save(db)
+			return err
+		} else {
+			return nil
+		}
+	}
+
+	series_stmt, err := db.Prepare("insert or replace into series(id, name, last_updated) values(?, ?, ?)")
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 	defer series_stmt.Close()
-	// TODO: Is inserting into an id twice an error?
-	// res, err := series_stmt.Exec(series.Id, series.Name, series.Last_updated);
-	series_stmt.Exec(series.Id, series.Name, series.Last_updated)
+	_, err = series_stmt.Exec(series.Id, series.Name, series.Last_updated)
+
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
 
 	episode.Entry.Save(db)
 
@@ -194,10 +233,9 @@ func (tv *Tv) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) err
 	}
 	defer episode_stmt.Close()
 
-	// TODO: Is inserting into an id twice an error?
-	episode_stmt.Exec(episode.Id, episode.Part, episode.Season, episode.SeriesId, episode.EntryID)
+	_, err = episode_stmt.Exec(episode.Id, episode.Part, episode.Season, episode.SeriesId, episode.EntryID)
 
-	return nil
+	return err
 }
 
 func (tv *Tv) Next(db *sql.DB) ([]string, error) {
@@ -206,7 +244,7 @@ func (tv *Tv) Next(db *sql.DB) ([]string, error) {
 			ON episode.seriesid = series.id	
 		join entry
 			ON episode.entryid = entry.id
-		where entry.watched = 0 and entry.deleted = 0")
+		where entry.watched = 0 and entry.deleted = 0
 	`)
 	if err != nil {
 		return nil, err
@@ -241,7 +279,7 @@ func (tv *Tv) Select(db *sql.DB, name string) (*Entry, error) {
 			ON episode.seriesid = series.id	
 		join entry
 			ON episode.entryid = entry.id
-		where entry.watched = 0 and entry.deleted = 0  and series.name = ?")
+		where entry.watched = 0 and entry.deleted = 0  and series.name = ?
 	`)
 
 	if err != nil {

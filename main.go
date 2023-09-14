@@ -5,12 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 
 	"os"
 	"os/exec"
 	"strconv"
 
 	"database/sql"
+
 	"github.com/adrg/xdg"
 	backend "github.com/dagle/movix/backend"
 	_ "github.com/mattn/go-sqlite3"
@@ -32,10 +34,8 @@ func Conf(configpath, dbpath string) *Config {
 	viper.SetDefault("Treshhold", 0.9)
 	viper.SetDefault("MatchLength", 0.35)
 	viper.SetDefault("VerifyLength", true)
-	viper.SetDefault("Moved", true)
 	viper.SetDefault("LuaPluginPath", LuaPath+"/movix.lua")
-	viper.SetDefault("Perm", 664)
-	viper.SetDefault("Mediapath", xdg.UserDirs.Videos+"/movix")
+	viper.SetDefault("Rewind", 1.5)
 
 	err := os.MkdirAll(configpath, 0750)
 	if err != nil {
@@ -93,9 +93,10 @@ func suggestusage() {
 func play(conf *Config, entry *backend.Entry) error {
 	// TODO: Move this to this to the config file, with some extremely
 	// small formating language
+	pos := math.Max(0, entry.Offset - conf.Rewind)
 	err := exec.Command("mpv",
 		"--script="+conf.LuaPluginPath,
-		"--start="+fmt.Sprintf("%f", entry.Offset),
+		"--start="+fmt.Sprintf("%f", pos),
 		entry.Path).Run()
 	if err != nil {
 		return err
@@ -168,10 +169,12 @@ func main() {
 			log.Fatal(err)
 		}
 	case "add":
-		// var producers []backend.URIProducer
 		if len(args) != 2 {
 			backend.Fatal("Add needs a filepath")
 		}
+
+		// In the future when we do something more like to support urls etc
+		// var producers []backend.URIProducer
 		// for _, prod := range producers {
 		// 	if prod.Match(args[1]) {
 		// 		prod.Add(db, &conf.Runtime, args[1], nil)
@@ -182,32 +185,16 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	case "migrate":
-		// db.AutoMigrate(&backend.Episode{})
-		// db.AutoMigrate(&backend.Series{})
-		// db.AutoMigrate(&backend.Movie{})
-	// case "rescan":
-	// 	backend.Rescan(db, &conf.Runtime, movies, tv)
-	// case "suggestdel":
-	// 	if len(args) < 2 {
-	// 		suggestusage()
-	// 	}
-	// 	suggest, err := backend.Suggest_deletions(db)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 		suggestusage()
-	// 	}
-	// 	fmt.Println(suggest)
-	// case "delete_group":
-	// 	if len(args) < 2 {
-	// 		deleteusage()
-	// 	}
-	// 	backend.Delete_group(db, args[1:])
-	case "delete":
+	case "delete-id":
 		if len(args) < 2 {
 			deleteusage()
 		}
 		backend.Delete(db, args[1:])
+	case "delete-fs":
+		if len(args) < 2 {
+			deleteusage()
+		}
+		backend.DeleteWalker(db, args[1])
 	case "watched":
 		if len(args) < 3 {
 			watchusage()

@@ -2,19 +2,17 @@ package movix
 
 import (
 	"errors"
-	// "fmt"
-	// "log"
-	// "os"
+	"fmt"
 	"time"
 
 	"database/sql"
+
 	tmdb "github.com/cyruzin/golang-tmdb"
 )
 
 type Movie struct {
-	// gorm.Model
 	Id      int64
-	EntryID int64
+	EntryID string
 	Entry   Entry
 }
 
@@ -32,6 +30,15 @@ func (m *Movies) InitDb(db *sql.DB) error {
 }
 
 const MOVIE_KEY string = "e130a499c97798cfac3ffb5d0e2cc1be"
+
+func make_movie_name(movie *tmdb.MovieDetails) string {
+	return fmt.Sprintf("%s (%s)", movie.Title, movie.ReleaseDate)
+}
+
+// This is so we can identify a movie.
+func make_movie_id(movie *tmdb.MovieDetails) string {
+	return fmt.Sprintf("movie: %d", movie.ID)
+}
 
 func get_movie(path, title string, runtime *Runtime) (*Movie, error) {
 	tmdbClient, err := tmdb.Init(MOVIE_KEY)
@@ -56,30 +63,60 @@ func get_movie(path, title string, runtime *Runtime) (*Movie, error) {
 		}
 	}
 	now := time.Now().Unix()
+	name := make_movie_name(movie_details)
+	eid := make_movie_id(movie_details)
 	return &Movie{
 		Entry: Entry{
-			Id:           movie_details.ID,
+			Id:           eid,
 			Path:         path,
 			Length:       length,
-			Name:         movie_details.Title,
+			Name:         name,
 			Added:        now,
 			Deleted:      false,
 			Offset:       0,
 			Watched:      false,
 			Watched_date: now, // this date is bogus but only so we can compare
 		},
-		EntryID: movie_details.ID,
+		EntryID: eid,
 	}, nil
 }
 
 // TODO: Add a overwrite flag
 func (m *Movies) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) error {
+	// this shouldn't be a part of add
+	entry, err := GetEntryPath(db, path)
+
+	// if we have the file in the db,
+	if err == nil && entry != nil {
+		if entry.Deleted {
+			entry.Deleted = false
+			entry.Added = time.Now().Unix()
+			_, err = entry.Save(db)
+			return err
+		} else {
+			return nil
+		}
+	}
+
 	movie, err := get_movie(path, info.Title, runtime)
 	if err != nil {
 		return err
 	}
 
-	movie_stmt, err := db.Prepare("insert into series(id, entryid) values(?, ?)");
+	entry, err = GetEntry(db, movie.EntryID)
+	if err == nil && entry != nil {
+		if entry.Deleted {
+			entry.Deleted = false
+			entry.Added = time.Now().Unix()
+			entry.Path = movie.Entry.Path
+			_, err = entry.Save(db)
+			return err
+		} else {
+			return nil
+		}
+	}
+
+	movie_stmt, err := db.Prepare("insert into movie(id, entryid) values(?, ?)");
 	if err != nil {
 		return err
 	}
@@ -107,7 +144,7 @@ func (m *Movies) Next(db *sql.DB) ([]string, error) {
 	rows, err := db.Query(`select entry.name from movie 
 		join entry
 			ON movie.entryid = entry.id
-		where entry.watched = 0 and entry.deleted = 0")
+		where entry.watched = 0 and entry.deleted = 0
 	`)
 
 	if err != nil {
