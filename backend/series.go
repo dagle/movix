@@ -154,7 +154,7 @@ func (series *Series) get_episode(path string, season, episodenum int64, treshho
 		Season:   season,
 		SeriesId: series.Id,
 		Series:   *series,
-		EntryID: eid,
+		EntryID:  eid,
 	}, nil
 }
 
@@ -198,7 +198,7 @@ func (tv *Tv) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) err
 		fmt.Println(err)
 		return err
 	}
-	
+
 	entry, err = GetEntry(db, episode.EntryID)
 	if err == nil && entry != nil {
 		if entry.Deleted {
@@ -305,7 +305,7 @@ func (tv *Tv) skipUntil(db *sql.DB, name string, season, episode int64) error {
 			ON entry.id = episode.entryid
 		join series
 			ON episode.seriesid = series.id
-		where series.name = ? and (series.season < ? or (series.season = ? and series.part < ?))")
+		where series.name = ? and (series.season < ? or (series.season = ? and series.part < ?))
 	`)
 	if err != nil {
 		return err
@@ -325,7 +325,7 @@ func (tv *Tv) unmarkAfter(db *sql.DB, name string, season, episode int64) error 
 			ON entry.id = episode.entryid
 		join series
 			ON episode.seriesid = series.id
-		where series.name = ? and (series.season > ? or (series.season = ? and series.part > ?))")
+		where series.name = ? and (series.season > ? or (series.season = ? and series.part > ?))
 	`)
 	if err != nil {
 		return err

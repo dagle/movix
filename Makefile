@@ -17,6 +17,9 @@ movix:
 movix.1:
 	scdoc < movix.1.scd > movix.1
 
+install-lua:
+	install -Dm755 movix.lua -t '$(SCRIPT)'
+
 package: movix movix.1
 	scdoc < movix.1.scd > movix.1
 	install -Dm755 movix -t '$(BINDIR)'

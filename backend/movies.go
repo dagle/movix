@@ -20,7 +20,7 @@ type Movies struct{}
 
 func (m *Movies) InitDb(db *sql.DB) error {
 	sqlStmt :=
-	`create table movie (
+		`create table movie (
       id int not null primary key,
       entryid int not null,
       FOREIGN KEY (entryid) REFERENCES entry(id))
@@ -116,7 +116,7 @@ func (m *Movies) Add(db *sql.DB, runtime *Runtime, path string, info *FileInfo) 
 		}
 	}
 
-	movie_stmt, err := db.Prepare("insert into movie(id, entryid) values(?, ?)");
+	movie_stmt, err := db.Prepare("insert into movie(id, entryid) values(?, ?)")
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (m *Movies) Next(db *sql.DB) ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var names []string
 	for rows.Next() {
 		var name string
@@ -178,7 +178,7 @@ func (m *Movies) Select(db *sql.DB, name string) (*Entry, error) {
 	from movie 
 		join entry
 			ON movie.entryid = entry.id
-		where entry.watched = 0 and entry.deleted = 0 and entry.name = ?")
+		where entry.watched = 0 and entry.deleted = 0 and entry.name = ?
 	`)
 
 	if err != nil {

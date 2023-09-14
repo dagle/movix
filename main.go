@@ -93,7 +93,7 @@ func suggestusage() {
 func play(conf *Config, entry *backend.Entry) error {
 	// TODO: Move this to this to the config file, with some extremely
 	// small formating language
-	pos := math.Max(0, entry.Offset - conf.Rewind)
+	pos := math.Max(0, entry.Offset-conf.Rewind)
 	err := exec.Command("mpv",
 		"--script="+conf.LuaPluginPath,
 		"--start="+fmt.Sprintf("%f", pos),

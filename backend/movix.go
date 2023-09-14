@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
+	"database/sql"
 	"os/exec"
 	"path/filepath"
-	"database/sql"
 
 	"github.com/tidwall/gjson"
 	ffmpeg "github.com/u2takey/ffmpeg-go"
@@ -46,11 +46,11 @@ type Seekable interface {
 }
 
 type Runtime struct {
-	LuaPluginPath string // path to the mpv plugin
-	Dbpath        string // path to the database
+	LuaPluginPath string  // path to the mpv plugin
+	Dbpath        string  // path to the database
 	Treshhold     float64 // How much do we need to watch before it counts as watching it all.
 	MatchLength   float64 // When verifying length, how close does it need to be?
-	VerifyLength  bool // should we verify that the length is correct? Doesn't work atm.
+	VerifyLength  bool    // should we verify that the length is correct? Doesn't work atm.
 	Rewind        float64 // amount we should rewind when we resume
 }
 
@@ -70,8 +70,7 @@ type FileInfo struct {
 }
 
 type Entry struct {
-	Id string
-	// RemoteId: int64,
+	Id           string
 	Length       float64
 	Path         string
 	Name         string
@@ -118,7 +117,7 @@ func (entry *Entry) Save(db *sql.DB) (sql.Result, error) {
 
 	result, err := movie_stmt.Exec(entry.Id, entry.Length, entry.Path, entry.Name, entry.Added, entry.Offset,
 		entry.Deleted, entry.Watched, entry.Watched_date)
-	
+
 	if err != nil {
 		log.Fatal(err)
 		return nil, err
