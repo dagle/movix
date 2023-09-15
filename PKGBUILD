@@ -14,22 +14,21 @@ conflicts=('movix')
 source=("git+https://github.com/dagle/movix")
 sha256sums=('SKIP')
 makedepends=(
-    'go'
+	'go'
 )
 
-pkgver() {
-	cd "$pkgname"
-	git describe --long --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
-}
+# pkgver() {
+# 	cd "$pkgname"
+# 	git describe --long --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+# }
 
 build() {
-    go build -ldflags "-X main.LuaPath=${SCRIPT}" 
+	# go build -ldflags "-X main.LuaPath=${SCRIPT}"
+	cd "$pkgname"
+	make movix PREFIX="${pkgdir}"
 }
 
 package() {
-	make movix "${pkgdir}"
-}
-
-package() {
-	make package "${pkgdir}"
+	cd "$pkgname"
+	make package PREFIX="${pkgdir}"
 }
